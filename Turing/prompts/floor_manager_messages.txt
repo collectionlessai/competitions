@@ -1,0 +1,91 @@
+Messages the floor manager sends into the room.
+
+Copied verbatim from the world's Config. <PLACEHOLDERS> are filled in before
+sending, and the [TAG] in square brackets is stripped before the message is
+shown to you.
+
+Most of these never reach your processor. Your guest code prints them to your
+console and drops them, so they are not in the transcript your processor reads.
+The exceptions are:
+
+  Config.survey_message / survey_message_nobody
+      the vote request, which does enter the transcript as a MANAGER line
+
+  "Dear <YOUR_NAME>, open the conversation naturally."
+      the opening nudge, which is not in this file because your guest code
+      generates it locally when the room starts
+
+Those two are the only MANAGER lines you will ever see inside a prompt.
+
+==============================================================================
+Config.init_message
+==============================================================================
+
+WELCOME TO THE TURING TEST HOTEL 🏨 (Your email: <YOUR_EMAIL>)!<br/><br/>This is a unique destination composed of rooms that implement the multi-agent Turing Test, where you will act as both the judge ⚖️ and a conversation partner 🗣️!<br/>You will judge others to detect who is human, while others judge whether you are a human 🧑 or a machine 🤖 (remember to act human).<br/><br/><strong>Have you already completed your profile? (optional)</strong> If not, please do so before starting this experience; you only need to do it once: <a href='https://docs.google.com/forms/d/e/1FAIpQLScF6FuSMDFpowk3bfLzrr35tGErxd864Rf7FuZI9ic8p-nQAg/viewform?usp=pp_url&entry.1591917462=<YOUR_EMAIL>'>Click Here!</a><br/><br/>Write any message to continue 😀
+
+==============================================================================
+Config.start_message
+==============================================================================
+
+[START_MSG] You were named **<YOUR_NAME>** and the other guests are **<OTHER_NAMES>**. Start chatting and keep it going for up to 300 seconds. You can type 'exit' at any time to immediately leave the room and provide your vote.
+
+==============================================================================
+Config.start_message_nobody
+==============================================================================
+
+[START_MSG_NOBODY] You were named **<YOUR_NAME>** and you are waiting for other guests to join this room. You can stay here for 300 seconds.
+
+==============================================================================
+Config.joined_message
+==============================================================================
+
+[JOINED_MSG] A new agent joined the room: **<SOME_NAME>**
+
+==============================================================================
+Config.left_message
+==============================================================================
+
+[LEFT_MSG] An agent left the room: **<SOME_NAME>**
+
+==============================================================================
+Config.disconnected_message
+==============================================================================
+
+[DISCO_MSG] An agent disconnected: **<SOME_NAME>**
+
+==============================================================================
+Config.reminder_message
+==============================================================================
+
+[GEN_MSG] Your name is **<YOUR_NAME>** and you will stay in this room for <TIME_LEFT> seconds, but you can type 'exit' at any time to immediately leave the room and provide your vote!
+
+==============================================================================
+Config.reminder_message_vote
+==============================================================================
+
+[GEN_MSG] You still have <TIME_LEFT> seconds to send your vote...
+
+==============================================================================
+Config.survey_message
+==============================================================================
+
+[VOTE_REQ_MSG] Dear **<YOUR_NAME>**, you have interacted with **<OTHER_NAMES>**. Each was either a human or an AI. It could also be they were all humans or all AIs. <br/><br/><strong>PLEASE LIST THE ONES YOU THINK WERE HUMANS</strong> (just list the names separated by commas or spaces, no need to write anything else). <br/><br/>You have max 240 seconds to do it.
+
+==============================================================================
+Config.survey_message_nobody
+==============================================================================
+
+[VOTE_REQ_MSG] Dear **<YOUR_NAME>**, unfortunately, you have not interacted with anybody. Write any message to continue (you have 240 seconds).
+
+==============================================================================
+Config.violation_message
+==============================================================================
+
+[GEN_MSG] Your join operation was flagged by the hotel manager, sorry but I have to disconnect you
+
+==============================================================================
+Config.history_first_message
+==============================================================================
+
+Dear <YOUR_NAME>, open the conversation naturally.
+

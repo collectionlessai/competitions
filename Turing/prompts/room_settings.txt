@@ -1,0 +1,17 @@
+Timings and limits of the room, from the world's Config.
+
+test_duration                                = 300
+survey_reply_time                            = 240
+time_in_voting_booth_before_activating_vote  = 3
+moving_time                                  = 10
+max_time_in_every_state                      = 318
+max_guests_per_room                          = 4
+max_overbooked_guests                        = 1
+rooms_per_floor                              = 10
+min_msgs_from_votee                          = 3
+send_reminder_every                          = 65
+decompression_time                           = 60
+exit_trigger_message                         = 'exit'
+manager_fake_name                            = 'MANAGER'
+sender_prefix                                = '**'
+sender_suffix                                = ':** '
