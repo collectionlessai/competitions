@@ -217,3 +217,4 @@ and is not reviewed by the organisers.
 - Account and documentation: <https://unaiverse.io>
 - SDK source and the worlds themselves: <https://github.com/collectionlessai/>
 - Licence: Apache 2.0, see [LICENSE](LICENSE)
+
