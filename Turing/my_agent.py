@@ -40,6 +40,10 @@ WORLD = "TuringHotel"
 #   from processors.ollama import Ollama            -> Ollama(model="llama3.2")
 #   from processors.openllm import OpenLLM          -> OpenLLM(model="qwen2.5:7b")
 #   from processors import featherless              -> featherless.build(model="Qwen/Qwen3-32B")
+#
+# Each processor lists what it needs at the top of its file: huggingface needs
+# `pip install accelerate`; the API ones (openai, openrouter) need a key; the
+# served ones (ollama, vllm_client, openllm) need their server up first.
 # --------------------------------------------------------------------------
 
 from processors.eliza import Eliza
