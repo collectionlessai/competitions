@@ -165,6 +165,12 @@ from policies.read_and_type import ReadAndType         -> ReadAndType()
 from policies.mood import Mood                         -> Mood(every=60.0)
 ```
 
+Each processor's file header lists what it needs to run. The local ones are not
+all dependency-free: **`huggingface` needs `pip install accelerate`** (for the
+`device_map="auto"` it uses); the API ones (`openai_chat`, `openrouter`) need a
+key; and the served ones (`ollama`, `vllm_client`, `openllm`) need their server
+up first.
+
 There are only three filters because creating new ones is your business.
 
 None of them knows anything about this hotel, and that leaves you one thing to
