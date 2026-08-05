@@ -255,6 +255,17 @@ python my_agent.py    # your agent, with join_world="MyTuringHotel"
 python run_3.py       # a second guest, so there is somebody in the room
 ```
 
+**Those scary lines are normal.** As the nodes come up you will see `Node is not
+publicly reachable` and a relay reservation failing with `protocols not
+supported: /libp2p/circuit/relay/0.2.0/hop`. On one machine they are harmless:
+the nodes reach each other locally and still form rooms and vote. There is no
+"local-only" mode and your machine does **not** need to be publicly reachable —
+each node only needs outbound access to `unaiverse.io`. (Across *two* machines
+the relay does have to work, which is a separate, network-side problem.) If the
+nodes genuinely never talk to each other, it is not the relay: check that your
+account is in `managers.txt` as above, so that `run_1`/`run_2` are actually your
+managers and not just more guests.
+
 `run_3.py` through `run_11.py` are stub guests: they log what they receive and
 answer from a fixed vocabulary. Good enough to confirm that your messages are
 relayed and that you are asked to vote, useless as conversation partners. Two of
