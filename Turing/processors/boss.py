@@ -100,8 +100,7 @@ class Boss(torch.nn.Module):
         self.persona = random.choice(self.personas)
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
-        self.last_spoke_at = 0.0
-        self.turns_since_spoke = 99
+        self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
 
     # -- backend ----------------------------------------------------------
 
@@ -131,7 +130,10 @@ class Boss(torch.nn.Module):
         self.director.new_room()
         self.pending_correction = ""
         self.my_vote = None
-        self.turns_since_spoke = 99
+
+        # `sense.elapsed` restarts with the room, so a stale value from the last
+        # one reads as "spoke in the future" and damps the whole room
+        self.last_spoke_at = -1.0
 
     # -- prompts ----------------------------------------------------------
 
@@ -279,11 +281,10 @@ class Boss(torch.nn.Module):
             return f"*{correction}"
 
         last = messages[-1].text if messages else ""
-        since = self.sense.elapsed - self.last_spoke_at if self.last_spoke_at else 999.0
+        since = (self.sense.elapsed - self.last_spoke_at) if self.last_spoke_at >= 0 else 999.0
         beat = self.director.plan(self.sense, turn, since, last)
 
         if not beat.speak:
-            self.turns_since_spoke += 1
             return ""
 
         reply = self._say(beat, last)
@@ -294,5 +295,4 @@ class Boss(torch.nn.Module):
         self.sense.i_spoke()
         self.director.spoke()
         self.last_spoke_at = self.sense.elapsed
-        self.turns_since_spoke = 0
         return reply
