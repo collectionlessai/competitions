@@ -19,6 +19,7 @@ accent dropped, an apostrophe skipped, a neighbouring key hit. Rate is the
 caller's business — `director.py` sets it per turn.
 """
 
+import os
 import re
 import random
 
@@ -42,19 +43,40 @@ URL = re.compile(r"https?://\S+|www\.\S+")
 MAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.\w{2,}\b")
 PHONE = re.compile(r"\b(?:\+39\s?)?3\d{2}[\s.-]?\d{6,7}\b")
 
-# The mild Italian profanity a natural register produces on its own. The world
-# masks it with `***` and does not even count it as a strike — but, as its own
-# test file puts it, "a masked word makes a human guest look like a censored
-# bot", so it is worth losing the word to keep the message. Heavier insults are
-# the persona's job to avoid; they earn strikes, not just asterisks.
-PROFANITY = re.compile(
-    r"\b(?:c[a4]zz\w*|stronz\w*|coglion\w*|merd\w*|puttan\w*|troi[ae]|"
-    r"vaffanculo|va'?\s*fan\s*culo|figa|minchi\w*|porc[oa]\s+(?:dio|madonna|troia))\b",
-    re.IGNORECASE)
+# The words the room would asterisk, taken from the world's own lists rather
+# than guessed. A hand-written regex covered 172 of the 976 Italian entries and
+# missed "culo", which `Qwen2.5-72B` used naturally — "congelarmi il culo" would
+# have been broadcast as "congelarmi il ***". As the world's own test file puts
+# it, "a masked word makes a human guest look like a censored bot".
+#
+# The slur lists are here too, and they matter more: those are the ones that
+# earn strikes, and five strikes puts the guest off the floor entirely.
+#
+# Copied from `unaiverse-examples/worlds/turing_ita/src/wordlists/` so the entry
+# stands alone. Refresh them if the world's lists move on.
+WORDLISTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlists")
+
+
+def _load_masked_words() -> frozenset:
+    words: set[str] = set()
+    for name in ("profanity_it.txt", "profanity_en.txt", "slurs_it.txt", "slurs_en.txt"):
+        path = os.path.join(WORDLISTS, name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                entry = line.strip().lower().rstrip("*")
+                if entry and not entry.startswith("#"):
+                    words.add(entry)
+    return frozenset(words)
+
+
+MASKED_WORDS = _load_masked_words()
+TOKEN = re.compile(r"[A-Za-zÀ-ÿ']+")
 
 # What the world's own filter would mask, which is a bigger tell than anything
 # it could have masked: everybody else sees your message full of asterisks
-MASKABLE = (URL, MAIL, PHONE, PROFANITY)
+MASKABLE = (URL, MAIL, PHONE)
 
 # The model breaking character. Not a style problem, a whole-message problem:
 # when one of these matches, the message is thrown away rather than tidied up.
@@ -128,9 +150,15 @@ def strip_noise(text: str) -> str:
 
 
 def drop_maskable(text: str) -> str:
-    """Take out what the world's message filter would asterisk."""
+    """Take out what the world's message filter would asterisk.
+
+    The last resort, used when asking the model again did not help: losing a
+    word beats broadcasting a line full of asterisks.
+    """
     for pattern in MASKABLE:
         text = pattern.sub("", text)
+    if MASKED_WORDS:
+        text = TOKEN.sub(lambda m: "" if m.group(0).lower() in MASKED_WORDS else m.group(0), text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
@@ -244,15 +272,20 @@ def is_assistant(text: str) -> bool:
     return bool(ASSISTANT.search(text))
 
 
+def masked_words(text: str) -> list[str]:
+    """The words in this message the room would replace with asterisks."""
+    return [w for w in TOKEN.findall(text.lower()) if w in MASKED_WORDS]
+
+
 def has_profanity(text: str) -> bool:
     """True when the world's filter would asterisk part of this message.
 
-    Worth knowing *before* sending, because the alternative — `drop_maskable`
-    cutting the word out — leaves "che merda di giornata" as "che di giornata",
-    and ungrammatical Italian is as much of a tell as the asterisks would have
-    been. The caller's better move is to ask the model again.
+    Worth knowing *before* sending, because the alternative — cutting the word
+    out — leaves "che merda di giornata" as "che di giornata", and
+    ungrammatical Italian is as much of a tell as the asterisks would have been.
+    The caller's better move is to ask the model again.
     """
-    return bool(PROFANITY.search(text))
+    return bool(masked_words(text))
 
 
 # What an Italian chat message is made of. Anything else — CJK punctuation, box

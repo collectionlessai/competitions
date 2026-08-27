@@ -202,8 +202,12 @@ class Boss(torch.nn.Module):
         where = ["DOVE SEI ADESSO",
                  "Sei in una chat con persone che non conosci."]
         if self.sense.my_name:
-            where.append(f"In questa chat ti chiamano {self.sense.my_name}, "
-                         f"e usi quel nome se te lo chiedono.")
+            # "usi quel nome" alone reads as "introduce yourself with it", and
+            # `Qwen2.5-72B` duly opened messages with "Roy qua" and "eh ciao roy
+            # qua". Nobody signs a chat message with their own name
+            where.append(f"Gli altri ti vedono come {self.sense.my_name}. "
+                         f"NON firmare i messaggi e non dire il tuo nome: si vede già. "
+                         f"Usalo solo se qualcuno te lo chiede espressamente.")
         others = self.sense.others
         if others:
             where.append(f"Gli altri sono {', '.join(others)}.")

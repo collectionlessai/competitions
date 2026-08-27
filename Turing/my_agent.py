@@ -47,15 +47,19 @@ NODE_NAME = "TuringBoss"
 # swap in "MyTuringHotel" to play against the local world in unaiverse-examples.
 WORLD = "stefano.melacci@unisi.it/TuringHotelItaly"
 
-# The model behind the persona. Run `python -m bench.run_bench --always-speak` to
-# compare the shortlist on the Italian register, the latency and how each one
-# holds up under probing, then put the winner here.
-MODEL = os.environ.get("BOSS_MODEL", "swap-uniba/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA")
+# The model behind the persona, chosen by `python -m bench.run_bench
+# --always-speak` over the seven rooms in `bench/probes.py`. Qwen2.5-72B won on
+# the thing that actually decides it: across 46 replies it degenerated into
+# another script 0 times and opened 15% of its lines with a shrug, against
+# 13%/70% for the fastest Italian fine-tune. Its median latency, 2.6s, turned
+# out to be the same as the 32B once warm — the 19s in the first screen was a
+# cold start.
+MODEL = os.environ.get("BOSS_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 
-# Where to go when the model above will not answer. The Italian fine-tunes are
-# the ones worth a persona and also the ones that return 503 capacity_exhausted
-# under load, which across a 300-second room is a guest who only ever says
-# "aspe". The fallback is built on first use, so it costs nothing until needed.
+# Where to go when the model above will not answer. Featherless returns 503
+# capacity_exhausted under load — constantly, on the small Italian fine-tunes —
+# and across a 300-second room that is a guest who only ever says "aspe". The
+# fallback is built on first use, so it costs nothing until it is needed.
 FALLBACK = os.environ.get("BOSS_FALLBACK", "Qwen/Qwen2.5-32B-Instruct")
 
 
