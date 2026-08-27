@@ -136,18 +136,35 @@ def cap_emoji(text: str, keep_chance: float = 0.2) -> str:
     return text
 
 
+# Words a sentence cannot end on. Cutting after one of them does not read as
+# somebody trailing off, it reads as a string that was cut: "io sono ROY in"
+DANGLING = {
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "del", "dei", "della",
+    "di", "a", "da", "in", "con", "su", "per", "tra", "fra", "al", "alla", "allo",
+    "e", "ed", "o", "ma", "che", "se", "come", "quando", "mentre", "perché",
+    "non", "più", "molto", "anche", "mi", "ti", "ci", "vi", "si", "ne", "è",
+    "io", "tu",
+}
+
+
 def cap_words(text: str, limit: int) -> str:
     """Cut to `limit` words, at the last punctuation before it when there is one."""
     words = text.split()
     if len(words) <= limit:
         return text
+
     cut = " ".join(words[:limit])
     for mark in (". ", "! ", "? ", ", "):
         if mark in cut:
             head = cut.rsplit(mark, 1)[0]
             if len(head.split()) >= max(3, limit // 2):
                 return head.rstrip(" ,")
-    return cut.rstrip(" ,")
+
+    # No clause boundary to cut at: back off any word the sentence cannot end on
+    kept = cut.rstrip(" ,").split()
+    while len(kept) > 2 and kept[-1].strip(".,;:!?").lower() in DANGLING:
+        kept.pop()
+    return " ".join(kept).rstrip(" ,")
 
 
 def chat_case(text: str, lower_chance: float = 0.65, stop_chance: float = 0.2) -> str:

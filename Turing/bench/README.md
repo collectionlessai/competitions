@@ -46,6 +46,14 @@ for is a change that moves them a lot.
 Plays the rooms against the Featherless catalogue and writes a report to
 `results/` (gitignored) with a table and the full transcripts.
 
+**Use `--always-speak` when comparing models.** A scripted room plays out in
+milliseconds, so the real director sees itself having just spoken on every turn
+and holds nearly all of them back — which is correct in a room and useless in a
+comparison, because you end up measuring the director, identically for every
+model. `--always-speak` keeps the style and the nudge and takes every turn, so
+one room yields one reply per turn to read. Without it, expect 1–3 replies out
+of 8 and very little to go on.
+
 The choice is not which model is smartest. 300 seconds of Italian small talk
 judged by people who study Italian for a living is decided by register: a model
 that writes textbook Italian loses to one that writes what people type. Hence
