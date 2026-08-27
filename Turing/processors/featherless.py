@@ -50,6 +50,11 @@ COSTS = ((re.compile(r"\b(?:65|70|72|8x22|120|180|235|405)b\b", re.IGNORECASE), 
 # comes from. `humanise.cut_runaway` catches what gets through anyway
 STOP = ["<|im_end|>", "<|im_start|>", "<|eot_id|>", "</s>", "<|endoftext|>", "[INST]"]
 
+# Not every chat template has a system turn. Gemma's does not, and the API says
+# so with a 400 rather than by ignoring it, which fails the whole call
+NO_SYSTEM = re.compile(r"system role not supported|system.{0,24}not supported", re.IGNORECASE)
+BAD_REQUEST = re.compile(r"bad_request|invalid_request|rejected as invalid", re.IGNORECASE)
+
 
 def _ensure_gateway(cls, timeout: float = 30.0) -> None:
     """Bring the shared gateway server up, without `fcntl`.
@@ -131,6 +136,7 @@ class FeatherlessBackend:
                  temperature: float = 0.95, top_p: float = 0.95, top_k: int = 60,
                  repetition_penalty: float = 1.08, stop: list | None = None, **kwargs):
         self.model = model
+        self.no_system = False       # set on the first "system role not supported"
 
         sampler = dict(kwargs.pop("sampler", None) or {})
         sampler.setdefault("stop", STOP if stop is None else stop)
@@ -143,6 +149,29 @@ class FeatherlessBackend:
 
     def __call__(self, prompt: str, system_prompt: str | None = None,
                  max_tokens: int | None = None, temperature: float | None = None) -> str:
+        """One generation, with the system prompt folded in where it has to be.
+
+        Some chat templates have no system turn — Gemma's is the one on the
+        shortlist — and the API rejects the whole call with a 400 rather than
+        ignoring the role. The first time that happens the prompt is rebuilt
+        with the system text on the front and the decision is remembered, so a
+        model like that costs one failed call per process rather than one per
+        turn, and no model that does support the role loses it.
+        """
+        if self.no_system and system_prompt:
+            prompt, system_prompt = f"{system_prompt}\n\n{prompt}", ""
+
+        try:
+            return self._generate(prompt, system_prompt, max_tokens, temperature)
+        except Exception as e:
+            merged = bool(system_prompt) and (NO_SYSTEM.search(str(e)) or BAD_REQUEST.search(str(e)))
+            if not merged:
+                raise
+            self.no_system = True
+            return self._generate(f"{system_prompt}\n\n{prompt}", "", max_tokens, temperature)
+
+    def _generate(self, prompt: str, system_prompt: str | None,
+                  max_tokens: int | None, temperature: float | None) -> str:
         net = self.api.module        # the inner Net: the sockets, the system prompt, the sampler
         assert net is not None
 
