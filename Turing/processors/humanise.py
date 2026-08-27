@@ -257,6 +257,10 @@ def looks_broken(text: str) -> bool:
     if not text:
         return False
     stripped = EMOJI.sub("", text)
+
+    # `*parola` is the correction people send after a typo, and this agent sends
+    # them on purpose — the one asterisk in front is meant, not debris
+    stripped = re.sub(r"^\s*\*(?=\w)", "", stripped)
     if not stripped.strip():
         return False
     foreign = sum(1 for c in stripped if not ALLOWED.match(c))

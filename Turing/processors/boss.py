@@ -219,19 +219,34 @@ class Boss(torch.nn.Module):
     # -- the chat path ----------------------------------------------------
 
     def _say(self, beat, last_text: str) -> str:
+        prompt = self._prompt(beat)
         try:
-            reply = self._ask(self._prompt(beat), self.preamble, max_tokens=self.max_tokens)
+            reply = humanise.strip_noise(
+                self._ask(prompt, self.preamble, max_tokens=self.max_tokens))
         except Exception as e:
             print(f"[boss] {e}")
             return random.choice(DROPPED)
 
-        reply = humanise.strip_noise(reply)
+        # Degeneration is not rare enough to shrug at: both leading models on the
+        # bench leaked another script — Cyrillic, Chinese, full-width
+        # punctuation — in about one turn in nine, and it correlates with the
+        # high sampling temperature the register needs. One resample, cooler,
+        # usually comes back clean, and buys a real line instead of a shrug.
+        if reply and humanise.looks_broken(reply):
+            try:
+                reply = humanise.strip_noise(
+                    self._ask(prompt, self.preamble, max_tokens=self.max_tokens,
+                              temperature=min(self.temperature, 0.7)))
+            except Exception as e:
+                print(f"[boss] {e}")
+                return random.choice(DROPPED)
+
         if not reply:
             return ""
 
-        # The model answered as itself, or stopped forming words at all.
-        # Nothing to salvage either way: a tidied-up "sono un assistente
-        # virtuale" is still an assistant, and half a broken token is worse
+        # The model answered as itself, or never came back to Italian. Nothing
+        # to salvage either way: a tidied-up "sono un assistente virtuale" is
+        # still an assistant, and half a broken token is worse
         if humanise.is_assistant(reply) or humanise.looks_broken(reply):
             out = humanise.deflect(avoid=self.recent_deflections)
             self.recent_deflections = (self.recent_deflections + [out])[-4:]
