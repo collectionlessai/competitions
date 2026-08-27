@@ -59,7 +59,15 @@ NO_SYSTEM_MODELS = re.compile(r"gemma", re.IGNORECASE)
 BAD_REQUEST = re.compile(r"bad_request|invalid_request|rejected as invalid", re.IGNORECASE)
 
 
-def _ensure_gateway(cls, timeout: float = 30.0) -> None:
+# The SDK asks for the server with a 15-second patience (`connect_timeout`), and
+# a cold start here has to import torch and the whole framework first. Observed
+# failing mid-benchmark once the previous server had exited: "the Featherless
+# gateway did not come up within 15s". The wait is idle, so a generous floor
+# costs nothing and a short one costs the run.
+GATEWAY_TIMEOUT = 90.0
+
+
+def _ensure_gateway(cls, timeout: float = GATEWAY_TIMEOUT) -> None:
     """Bring the shared gateway server up, without `fcntl`.
 
     Same contract as the SDK's `FeatherlessAPI._ensure_server`, minus the lock.
@@ -71,6 +79,7 @@ def _ensure_gateway(cls, timeout: float = 30.0) -> None:
     if cls._server_is_up():
         return
 
+    timeout = max(timeout, GATEWAY_TIMEOUT)
     subprocess.Popen([sys.executable, "-c",
                       "from unaiverse.modules.utils import serve_api_gateway; serve_api_gateway()"],
                      close_fds=True)
