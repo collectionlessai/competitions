@@ -227,12 +227,14 @@ class Boss(torch.nn.Module):
             print(f"[boss] {e}")
             return random.choice(DROPPED)
 
-        # Degeneration is not rare enough to shrug at: both leading models on the
-        # bench leaked another script — Cyrillic, Chinese, full-width
-        # punctuation — in about one turn in nine, and it correlates with the
-        # high sampling temperature the register needs. One resample, cooler,
-        # usually comes back clean, and buys a real line instead of a shrug.
-        if reply and humanise.looks_broken(reply):
+        # Two reasons to ask again rather than send this. Degeneration is not
+        # rare enough to shrug at: both leading models on the bench leaked
+        # another script — Cyrillic, Chinese, full-width punctuation — in about
+        # one turn in nine, and it correlates with the high sampling temperature
+        # the register needs. And a word the world would mask costs the whole
+        # message, since cutting it out leaves ungrammatical Italian behind.
+        # One resample, cooler, usually comes back clean and buys a real line.
+        if reply and (humanise.looks_broken(reply) or humanise.has_profanity(reply)):
             try:
                 reply = humanise.strip_noise(
                     self._ask(prompt, self.preamble, max_tokens=self.max_tokens,

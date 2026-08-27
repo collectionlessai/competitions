@@ -42,9 +42,19 @@ URL = re.compile(r"https?://\S+|www\.\S+")
 MAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.\w{2,}\b")
 PHONE = re.compile(r"\b(?:\+39\s?)?3\d{2}[\s.-]?\d{6,7}\b")
 
+# The mild Italian profanity a natural register produces on its own. The world
+# masks it with `***` and does not even count it as a strike — but, as its own
+# test file puts it, "a masked word makes a human guest look like a censored
+# bot", so it is worth losing the word to keep the message. Heavier insults are
+# the persona's job to avoid; they earn strikes, not just asterisks.
+PROFANITY = re.compile(
+    r"\b(?:c[a4]zz\w*|stronz\w*|coglion\w*|merd\w*|puttan\w*|troi[ae]|"
+    r"vaffanculo|va'?\s*fan\s*culo|figa|minchi\w*|porc[oa]\s+(?:dio|madonna|troia))\b",
+    re.IGNORECASE)
+
 # What the world's own filter would mask, which is a bigger tell than anything
 # it could have masked: everybody else sees your message full of asterisks
-MASKABLE = (URL, MAIL, PHONE)
+MASKABLE = (URL, MAIL, PHONE, PROFANITY)
 
 # The model breaking character. Not a style problem, a whole-message problem:
 # when one of these matches, the message is thrown away rather than tidied up.
@@ -232,6 +242,17 @@ def add_typo(text: str) -> tuple[str, str]:
 def is_assistant(text: str) -> bool:
     """True when the model answered as itself rather than as the persona."""
     return bool(ASSISTANT.search(text))
+
+
+def has_profanity(text: str) -> bool:
+    """True when the world's filter would asterisk part of this message.
+
+    Worth knowing *before* sending, because the alternative — `drop_maskable`
+    cutting the word out — leaves "che merda di giornata" as "che di giornata",
+    and ungrammatical Italian is as much of a tell as the asterisks would have
+    been. The caller's better move is to ask the model again.
+    """
+    return bool(PROFANITY.search(text))
 
 
 # What an Italian chat message is made of. Anything else — CJK punctuation, box
