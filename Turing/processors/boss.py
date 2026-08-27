@@ -151,6 +151,7 @@ class Boss(torch.nn.Module):
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
+        self.recent_openers: list[str] = []       # so every line does not start the same way
 
     # -- backend ----------------------------------------------------------
 
@@ -180,6 +181,7 @@ class Boss(torch.nn.Module):
         self.director.new_room()
         self.pending_correction = ""
         self.my_vote = None
+        self.recent_openers = []
 
         # `sense.elapsed` restarts with the room, so a stale value from the last
         # one reads as "spoke in the future" and damps the whole room
@@ -211,10 +213,26 @@ class Boss(torch.nn.Module):
         parts.append("CONVERSAZIONE (tu sei 'io')\n"
                      + (transcript or "(non ha ancora parlato nessuno)"))
 
+        # Telling it not to repeat itself in general does nothing; naming the
+        # words it actually just used does. Measured over a full seven-room run,
+        # `LLaMAntino-3-ANITA-8B` opened 24 of 46 replies with the literal word
+        # "non" and 70% with some negation or shrug, and `Qwen2.5-32B` leaned on
+        # "boh" and "ehi" the same way. A guest whose every line starts alike is
+        # recognisable long before anything they say is.
+        if self.recent_openers:
+            parts.append("NON INIZIARE il messaggio con queste parole, le hai già usate: "
+                         + ", ".join(dict.fromkeys(self.recent_openers)))
+
         if beat.nudge:
             parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
         parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
         return "\n\n".join(parts)
+
+    def _note_opener(self, reply: str) -> None:
+        """Remember how this line started, so the next few do not start the same."""
+        words = reply.split()
+        if words:
+            self.recent_openers = (self.recent_openers + [words[0].lower().strip(",.!?")])[-4:]
 
     # -- the chat path ----------------------------------------------------
 
@@ -370,6 +388,7 @@ class Boss(torch.nn.Module):
             return ""
 
         self.conv.remember(reply)
+        self._note_opener(reply)
         self.sense.i_spoke()
         self.director.spoke()
         self.last_spoke_at = self.sense.elapsed
