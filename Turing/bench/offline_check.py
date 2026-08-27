@@ -102,6 +102,20 @@ def separator_pass() -> None:
     check("Pax" in boss.sense.heard, "the \\x1e batch did not parse into speakers")
     check(boss.sense.my_name == "Roy", "name lost across the batch")
 
+    # Since the world's "handle multi-line messages" change an event keeps its
+    # own newlines, so those must not be read as event boundaries: the second
+    # line would arrive with no sender, and an unnamed event is the world talking
+    boss = Boss(backend=Canned())
+    boss(probes.START)
+    boss("**Ivy:** allora\nsecondo me qui c'è un bot\nvero?")
+
+    said = boss.sense.speakers.get("Ivy")
+    print(f"multi-line event -> Ivy said {said.count if said else 0} message(s)")
+    check(said is not None and said.count == 1,
+          "a multi-line message was split into several events")
+    check(said is not None and "vero?" in said.msgs[0],
+          "the tail of a multi-line message was lost")
+
 
 def rooms_pass() -> None:
     print()

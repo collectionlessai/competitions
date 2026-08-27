@@ -24,6 +24,7 @@ Nothing here branches on a sentence the world sends today.
 """
 
 import os
+import re
 import random
 
 import torch
@@ -56,17 +57,48 @@ VOTE_SYSTEM = (
 )
 
 
-# Events batched into one sample are joined with this in the deployed world
-# (`Config.event_separator`, an ASCII record separator). The copy of the world in
-# unaiverse-examples still joins them with a newline, and `Conversation` splits
-# on newlines, so a batch from the real hotel would otherwise arrive as one
-# unparsable line with every event glued together: no speakers, no roster, no
-# vote. Both are normalised to newlines here, before anything reads them.
+# Two worlds send the same events batched two different ways, and `Conversation`
+# understands one of them: one event per line.
+#
+# The copy in unaiverse-examples joins events with a newline and flattens the
+# newlines inside each one first, so its samples already arrive in that shape.
+# The deployed world joins them with an ASCII record separator instead
+# (`Config.event_separator`) and, since its "handle multi-line messages" change,
+# **an event keeps its own newlines**. Read that the naive way and one guest
+# writing two lines becomes two events, the second with no sender — which
+# `room.py` reads as the manager talking, because unnamed events are the world.
 EVENT_SEPARATOR = "\x1e"
+SENDER_LINE = re.compile(r"^\s*\*\*[^*]{1,64}:\*\*")
 
 
 def normalise(sample: str) -> str:
-    return (sample or "").replace(EVENT_SEPARATOR, "\n")
+    """One event per line, whichever world sent it.
+
+    With a record separator present the split is exact: each part is one event,
+    and its internal newlines are flattened the way the older world did it.
+
+    Without one the sample is either an old-world batch (newlines separate
+    events) or a new-world single event (newlines are inside it), which cannot
+    be told apart from the text alone. A line that does not open with
+    `**Sender:**` is treated as the continuation it almost always is, and joined
+    back onto the line above; a genuinely unnamed event, like the disconnection
+    notice, has no line above it to join and survives.
+    """
+    sample = sample or ""
+
+    if EVENT_SEPARATOR in sample:
+        events = [" ".join(event.split()) for event in sample.split(EVENT_SEPARATOR)]
+        return "\n".join(event for event in events if event)
+
+    lines: list[str] = []
+    for line in sample.splitlines():
+        if not line.strip():
+            continue
+        if lines and not SENDER_LINE.match(line):
+            lines[-1] += " " + line.strip()
+        else:
+            lines.append(line.strip())
+    return "\n".join(lines)
 
 
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
