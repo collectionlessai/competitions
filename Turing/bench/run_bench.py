@@ -41,13 +41,18 @@ from processors import humanise
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(HERE, "results")
 
-# Confirm the ids against `--list-models` before a run: Featherless names models
-# by their Hugging Face repo, and the fine-tunes get re-uploaded under new tags
+# Checked against `--list-models` on 2026-08-27. Featherless names models by
+# their Hugging Face repo and the fine-tunes get re-uploaded under new tags, so
+# check again rather than trusting this list. Minerva
+# (`sapienzanlp/Minerva-7B-instruct-v1.0`) was on the plan's shortlist and is
+# NOT served here; the Italian slots below are what the catalogue actually has.
 SHORTLIST = [
     # Italian fine-tunes: the register is the whole game
     "mii-llm/maestrale-chat-v0.4-beta",
     "swap-uniba/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA",
-    "sapienzanlp/Minerva-7B-instruct-v1.0",
+    "anakin87/gemma-2-9b-neogenesis-ita",
+    "DeepMount00/Llama-3.1-8b-ITA",
+    "m-polignano/ANITA-NEXT-24B-Dolphin-Mistral-UNCENSORED-ITA",
     # Frontier multilingual: better Italian than their size suggests, slower
     "Qwen/Qwen2.5-72B-Instruct",
     "meta-llama/Llama-3.3-70B-Instruct",
@@ -71,20 +76,25 @@ class Recorder:
         self.latencies: list[float] = []
         self.raw: list[str] = []
 
-    def complete(self, messages, **overrides):
+    def __call__(self, prompt, **kwargs):
         start = time.monotonic()
-        out = self.inner.complete(messages, **overrides)
+        out = self.inner(prompt, **kwargs)
         self.latencies.append(time.monotonic() - start)
         self.raw.append(out)
         return out
+
+    def close(self):
+        closer = getattr(self.inner, "close", None)
+        if callable(closer):
+            closer()
 
 
 def build_backend(model: str, offline: bool):
     if offline:
         return Canned()
-    from processors.featherless import Featherless
-    return Featherless(model=model, max_tokens=60, temperature=0.95,
-                       top_p=0.95, top_k=60, repetition_penalty=1.08)
+    from processors.featherless import FeatherlessBackend
+    return FeatherlessBackend(model=model, max_tokens=60, temperature=0.95,
+                              top_p=0.95, top_k=60, repetition_penalty=1.08)
 
 
 def play(scenario, model: str, offline: bool) -> dict:
@@ -93,9 +103,14 @@ def play(scenario, model: str, offline: bool) -> dict:
     boss = Boss(model=model, backend=recorder)
 
     turns = []
-    for sample in scenario.samples:
-        head = sample.splitlines()[0]
-        turns.append({"in": head[:90], "out": boss(sample)})
+    try:
+        for sample in scenario.samples:
+            head = sample.splitlines()[0]
+            turns.append({"in": head[:90], "out": boss(sample)})
+    finally:
+        # Each room opens its own gateway registration; without this they pile
+        # up for the whole benchmark and the server never sees them released
+        recorder.close()
 
     spoken = [t["out"] for t in turns if t["out"]]
     flags = {

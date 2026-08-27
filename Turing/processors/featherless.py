@@ -1,103 +1,171 @@
-"""Featherless AI, through the OpenAI protocol.
+"""Featherless, through the gateway that ships with the SDK.
 
-    pip install openai
+    pip install unaiverse
     export FEATHERLESS_API_KEY=rc_...
 
-Same body as `openrouter.py`, which is the same body as `openai_chat.py`: one
-OpenAI client pointed somewhere else. Two things are specific to Featherless.
+`unaiverse.modules.networks.FeatherlessAPI` is already a processor: it owns a
+persistent registration socket onto a shared gateway server, which it spawns on
+first use, and that server is what actually talks to Featherless. Going through
+it rather than through an `OpenAI` client of our own is what keeps every agent
+on this account inside one concurrency budget — `cost` is the price of a call,
+and the gateway schedules against it — instead of each process opening its own
+connection and discovering the ceiling the hard way.
 
-The base url is `https://api.featherless.ai/v1` and the key is read with
-`os.environ[...]` in the constructor, so a missing export raises a `KeyError`
-before you have a processor at all.
+The catch is that the gateway fixes the system prompt and the sampler **at
+construction**, and takes one prompt string per call. The boss needs neither:
+the persona changes every room, the director's line changes every turn, and the
+vote runs at a different temperature and token ceiling from the chat. So
+`FeatherlessBackend` patches `system_prompt` and `sampler` on the inner `Net`
+around each call and restores them in a `finally` — the same adapter the
+organisers' own guests use (`ita/basic_factory/processors.py` in
+collectionlessai/Turing-Hotel), which is worth matching rather than inventing a
+second way of doing it.
 
-And the samplers that matter for chat realism (`top_k`, `min_p`,
-`repetition_penalty`) are not OpenAI fields. The SDK sends them to the same
-gateway through `extra_body`, splitting them off with the frozenset in
-`unaiverse/modules/utils.py`; this file imports that same set, so the split
-stays right if the API grows a field. Pass any of them as a keyword and it lands
-on the correct side on its own:
+The contract it exposes is the one `boss.py` calls and `bench/canned.py` fakes:
 
-    Featherless(model="Qwen/Qwen2.5-72B-Instruct", temperature=0.9, top_k=60)
+    backend(prompt, system_prompt=..., max_tokens=..., temperature=...) -> str
 
-The class is a plain `str -> str` processor like the rest of the folder, and it
-is also usable as a bare backend: `complete(messages)` takes an OpenAI-style
-message list and returns the text, which is what `boss.py` calls.
-
-There is a second route to the same models. `unaiverse.modules.networks
-.FeatherlessAPI` is a processor already, running over the SDK's shared gateway
-with a concurrency budget. It is the right choice when you want the SDK to
-schedule your calls; this file is the right choice when you want the ordinary
-client, one call per turn, and full control over the message list.
+One instance per agent. Call `close()` (or let the process die) to release the
+registration; when the last one goes, the server shuts itself down.
 """
 
-import os
+import re
 import time
+import socket
+import subprocess
+import sys
 
-import torch
-from openai import OpenAI
+from unaiverse.modules.networks import FeatherlessAPI
+from unaiverse.modules.utils import APIGatewayServer
 
-from utils import Conversation
+# What the gateway charges per call, by model size. The accepted values are
+# 1, 2 and 4, and the number has to match the model actually asked for
+COSTS = ((re.compile(r"\b(?:65|70|72|8x22|120|180|235|405)b\b", re.IGNORECASE), 4),
+         (re.compile(r"\b(?:deepseek|kimi)", re.IGNORECASE), 4),
+         (re.compile(r"\b(?:22|24|27|30|32|34|35)b\b", re.IGNORECASE), 2))
 
-try:
-    # The one place that already knows which sampler names OpenAI accepts
-    from unaiverse.modules.utils import OPENAI_NATIVE_SAMPLER_PARAMS
-except Exception:  # pragma: no cover - only if the SDK moves the constant
-    OPENAI_NATIVE_SAMPLER_PARAMS = frozenset({
-        "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty",
-        "stop", "seed", "n", "logit_bias", "logprobs", "top_logprobs", "response_format",
-    })
-
-BASE_URL = "https://api.featherless.ai/v1"
-
-# What a person with a bad connection sends, rather than nothing at all: a
-# silent turn is invisible in the logs, and the SDK already swallows exceptions
-FALLBACK = "scusate, mi è saltata la linea un attimo"
+# Not every model on the catalogue has its end-of-turn token wired up as a stop,
+# and one that does not runs straight past it and writes the next speaker's line
+# for them. These are the markers that end our turn, whichever family the model
+# comes from. `humanise.cut_runaway` catches what gets through anyway
+STOP = ["<|im_end|>", "<|im_start|>", "<|eot_id|>", "</s>", "<|endoftext|>", "[INST]"]
 
 
-class Featherless(torch.nn.Module):
+def _ensure_gateway(cls, timeout: float = 30.0) -> None:
+    """Bring the shared gateway server up, without `fcntl`.
 
-    def __init__(self, model: str = "Qwen/Qwen2.5-72B-Instruct",
-                 system_prompt: str = "", max_tokens: int = 60,
-                 temperature: float = 0.9, keep: int = 80, timeout: float = 20.0,
-                 **sampler):
-        super().__init__()
-        self.client = OpenAI(base_url=BASE_URL,
-                             api_key=os.environ["FEATHERLESS_API_KEY"],
-                             timeout=timeout)
+    Same contract as the SDK's `FeatherlessAPI._ensure_server`, minus the lock.
+    That lock guards exactly one thing — two processes racing to spawn the
+    server — and losing that race is already harmless, because the loser fails
+    to bind the port and dies. Everything else here is the same: fast-path the
+    check, spawn detached, wait for the port.
+    """
+    if cls._server_is_up():
+        return
+
+    subprocess.Popen([sys.executable, "-c",
+                      "from unaiverse.modules.utils import serve_api_gateway; serve_api_gateway()"],
+                     close_fds=True)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if cls._server_is_up():
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"the Featherless gateway did not come up on "
+                       f"{APIGatewayServer.HOST}:{APIGatewayServer.PORT} within {timeout:.0f}s")
+
+
+def install_windows_shim() -> bool:
+    """Make `FeatherlessAPI` constructible on Windows. No-op everywhere else.
+
+    `FeatherlessAPI._ensure_server` begins with `import fcntl`, a Unix-only
+    module, and `__init__` calls it unconditionally — so on Windows the class
+    raises `ModuleNotFoundError` before it can even check whether the server it
+    wants is already running. Starting the server first does not help for the
+    same reason: the import is the first statement in the method.
+
+    So the method is replaced, and only when the import genuinely is not
+    available. This is an SDK portability bug rather than something about this
+    entry, and it is worth reporting upstream — the whole gateway works on
+    Windows once past this one line.
+
+    Returns True when the shim was installed.
+    """
+    try:
+        import fcntl  # noqa: F401
+        return False
+    except ImportError:
+        FeatherlessAPI._ensure_server = classmethod(_ensure_gateway)
+        return True
+
+
+WINDOWS_SHIM = install_windows_shim()
+
+
+def cost_for(model: str) -> int:
+    """The gateway's unit price for a model id, guessed from the size in its name.
+
+    A guess, because the id is the only thing we have: pass `cost=` explicitly
+    when it is wrong. Too low and the gateway over-schedules the model; the
+    table it comes from is in the SDK's own Featherless notes.
+    """
+    for pattern, cost in COSTS:
+        if pattern.search(model):
+            return cost
+    return 1
+
+
+class FeatherlessBackend:
+    """A `FeatherlessAPI` handle with a per-call system prompt and sampler.
+
+    Args:
+        model: the model id, which on Featherless is its Hugging Face repo name.
+        cost: the gateway's unit price, or None to guess it from the model id.
+        max_tokens, temperature, top_p, top_k, repetition_penalty: the defaults
+            for every call, each overridable per call where the caller passes one.
+        **kwargs: forwarded to `FeatherlessAPI` (`min_p`, `sampler`, ...).
+    """
+
+    def __init__(self, model: str, cost: int | None = None, max_tokens: int = 60,
+                 temperature: float = 0.95, top_p: float = 0.95, top_k: int = 60,
+                 repetition_penalty: float = 1.08, stop: list | None = None, **kwargs):
         self.model = model
-        self.system_prompt = system_prompt
-        self.conv = Conversation(keep=keep)
 
-        # Everything the caller asked for, in one dict, split at call time
-        self.sampler = {"max_tokens": max_tokens, "temperature": temperature, **sampler}
+        sampler = dict(kwargs.pop("sampler", None) or {})
+        sampler.setdefault("stop", STOP if stop is None else stop)
 
-        # Wall time of the last call, so a benchmark (or a timing filter) can
-        # read how long the model actually took without wrapping every call
-        self.last_latency = 0.0
+        self.api = FeatherlessAPI(model=model, cost=cost if cost is not None else cost_for(model),
+                                  max_tokens=max_tokens, temperature=temperature,
+                                  top_p=top_p, top_k=top_k,
+                                  repetition_penalty=repetition_penalty,
+                                  sampler=sampler, **kwargs)
 
-    def complete(self, messages: list[dict], **overrides) -> str:
-        """One chat completion. Overrides are merged over the constructor samplers."""
-        sampler = {**self.sampler, **overrides}
-        native = {k: v for k, v in sampler.items() if k in OPENAI_NATIVE_SAMPLER_PARAMS}
-        extra = {k: v for k, v in sampler.items() if k not in OPENAI_NATIVE_SAMPLER_PARAMS}
+    def __call__(self, prompt: str, system_prompt: str | None = None,
+                 max_tokens: int | None = None, temperature: float | None = None) -> str:
+        net = self.api.module        # the inner Net: the sockets, the system prompt, the sampler
+        assert net is not None
 
-        kwargs = {"model": self.model, "messages": messages, **native}
-        if extra:
-            kwargs["extra_body"] = extra
-
-        start = time.monotonic()
-        answer = self.client.chat.completions.create(**kwargs)
-        self.last_latency = time.monotonic() - start
-        return (answer.choices[0].message.content or "").strip()
-
-    def forward(self, sample: str) -> str:
-        self.conv.add(sample)
-
+        saved_prompt = net.system_prompt
+        saved_sampler = dict(net.sampler)
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
-        except Exception as e:
-            print(f"[featherless] {e}")
-            return FALLBACK
+            if system_prompt is not None:
+                net.system_prompt = system_prompt
+            if max_tokens is not None and max_tokens > 0:
+                net.sampler["max_tokens"] = int(max_tokens)
+            if temperature is not None and temperature >= 0.:
+                net.sampler["temperature"] = float(temperature)
 
-        self.conv.remember(reply)
-        return reply
+            out = self.api(prompt)   # ModuleWrapper.forward returns a tuple
+        finally:
+            net.system_prompt = saved_prompt
+            net.sampler.clear()
+            net.sampler.update(saved_sampler)
+
+        if isinstance(out, tuple):
+            out = out[0] if out else ""
+        return out if isinstance(out, str) else ""
+
+    def close(self) -> None:
+        """Release the gateway sockets. The server stops when the last caller goes."""
+        self.api.close()

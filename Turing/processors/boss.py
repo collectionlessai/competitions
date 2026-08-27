@@ -7,8 +7,9 @@ Four files, one job each, and this one is the glue.
     humanise.py      what the answer looks like once it exists
     room.py          who is at the table, what was asked, and who is a machine
 
-The model is a plain backend with a `complete(messages)` method, so swapping
-Featherless for anything else is one constructor argument, and the offline check
+The model is a plain callable — `backend(prompt, system_prompt=, max_tokens=,
+temperature=)` — which is the shape the SDK's Featherless gateway has, so
+swapping it for anything else is one constructor argument and the offline check
 in `bench/` runs the whole agent with a canned backend and no API key at all.
 
 Two paths through `forward()`. Most turns are the chat path: read the room,
@@ -55,6 +56,19 @@ VOTE_SYSTEM = (
 )
 
 
+# Events batched into one sample are joined with this in the deployed world
+# (`Config.event_separator`, an ASCII record separator). The copy of the world in
+# unaiverse-examples still joins them with a newline, and `Conversation` splits
+# on newlines, so a batch from the real hotel would otherwise arrive as one
+# unparsable line with every event glued together: no speakers, no roster, no
+# vote. Both are normalised to newlines here, before anything reads them.
+EVENT_SEPARATOR = "\x1e"
+
+
+def normalise(sample: str) -> str:
+    return (sample or "").replace(EVENT_SEPARATOR, "\n")
+
+
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
     """The preamble and the people, out of one file. Blocks are split on `---`."""
     with open(path, encoding="utf-8") as handle:
@@ -72,9 +86,9 @@ class Boss(torch.nn.Module):
 
     Args:
         model: the model id on the backend, when the backend is built here.
-        backend: anything with `complete(messages, **overrides) -> str`. Built as
-            a `Featherless` on first use when not given, which is also when the
-            API key is first required.
+        backend: any callable `(prompt, system_prompt=, max_tokens=,
+            temperature=) -> str`. Built as a `FeatherlessBackend` on first use
+            when not given, which is also when the API key is first required.
         persona_file: the pool to draw a person from at the start of each room.
         keep: how many messages of history to hold, passed to `Conversation`.
         director: a configured `Director`, or None for the defaults.
@@ -106,13 +120,13 @@ class Boss(torch.nn.Module):
 
     def _backend(self):
         if self.backend is None:
-            from processors.featherless import Featherless
-            self.backend = Featherless(model=self.model, max_tokens=self.max_tokens,
-                                       temperature=self.temperature, **self.sampler)
+            from processors.featherless import FeatherlessBackend
+            self.backend = FeatherlessBackend(model=self.model, max_tokens=self.max_tokens,
+                                              temperature=self.temperature, **self.sampler)
         return self.backend
 
-    def _ask(self, messages: list[dict], **overrides) -> str:
-        return self._backend().complete(messages, **overrides)
+    def _ask(self, prompt: str, system_prompt: str, **overrides) -> str:
+        return self._backend()(prompt, system_prompt=system_prompt, **overrides)
 
     # -- a new room -------------------------------------------------------
 
@@ -137,8 +151,15 @@ class Boss(torch.nn.Module):
 
     # -- prompts ----------------------------------------------------------
 
-    def _system(self, beat) -> str:
-        parts = [self.preamble, self.persona]
+    def _prompt(self, beat) -> str:
+        """The turn as one string, since the gateway takes one string.
+
+        The invariant half — how this person writes and behaves — is the system
+        prompt and never changes. Everything that does change is here, with the
+        director's line last, right up against the reply: an instruction buried
+        above a page of conversation is one the model has already forgotten.
+        """
+        parts = [self.persona]
 
         where = ["DOVE SEI ADESSO",
                  "Sei in una chat con persone che non conosci."]
@@ -150,17 +171,20 @@ class Boss(torch.nn.Module):
             where.append(f"Gli altri sono {', '.join(others)}.")
         parts.append("\n".join(where))
 
+        transcript = self.conv.transcript(limit=30)
+        parts.append("CONVERSAZIONE (tu sei 'io')\n"
+                     + (transcript or "(non ha ancora parlato nessuno)"))
+
         if beat.nudge:
             parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
+        parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
         return "\n\n".join(parts)
 
     # -- the chat path ----------------------------------------------------
 
     def _say(self, beat, last_text: str) -> str:
-        messages = self.conv.as_messages(system=self._system(beat),
-                                         nudge="(tocca a te, dì qualcosa di tuo)")
         try:
-            reply = self._ask(messages, max_tokens=self.max_tokens)
+            reply = self._ask(self._prompt(beat), self.preamble, max_tokens=self.max_tokens)
         except Exception as e:
             print(f"[boss] {e}")
             return random.choice(DROPPED)
@@ -215,9 +239,7 @@ class Boss(torch.nn.Module):
         names: list[str] = []
         meant_nobody = False
         try:
-            answer = self._ask([{"role": "system", "content": VOTE_SYSTEM},
-                                {"role": "user", "content": prompt}],
-                               max_tokens=30, temperature=0.3)
+            answer = self._ask(prompt, VOTE_SYSTEM, max_tokens=30, temperature=0.3)
             names, meant_nobody = self._parse_vote(answer, candidates)
         except Exception as e:
             print(f"[boss] vote: {e}")
@@ -251,6 +273,7 @@ class Boss(torch.nn.Module):
     # -- the contract -----------------------------------------------------
 
     def forward(self, sample: str) -> str:
+        sample = normalise(sample)
         messages = self.conv.add(sample)
         turn = self.sense.read(sample, messages)
 

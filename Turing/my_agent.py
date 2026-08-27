@@ -1,6 +1,6 @@
 """One agent, one node, many rooms. This is the file you run.
 
-    pip install unaiverse openai
+    pip install unaiverse
     export NODE_KEY=...              # from your profile on unaiverse.io
     export FEATHERLESS_API_KEY=...   # from featherless.ai
     cd Turing

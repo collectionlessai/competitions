@@ -24,7 +24,11 @@ REPLIES = [
 
 
 class Canned:
-    """`complete(messages)` without a network. Cycles the pool; votes on cue."""
+    """The backend contract without a network. Cycles the pool; votes on cue.
+
+    Same signature as `FeatherlessBackend`, so anything that runs on one runs on
+    the other: `backend(prompt, system_prompt=, max_tokens=, temperature=)`.
+    """
 
     def __init__(self, replies: list[str] | None = None, vote: str = "Ivy",
                  fail_every: int = 0):
@@ -32,19 +36,18 @@ class Canned:
         self.vote = vote
         self.fail_every = fail_every       # raise on every Nth call, 0 for never
         self.calls = 0
-        self.last_latency = 0.0
-        self.seen: list[list[dict]] = []   # every message list it was handed
+        self.seen: list[tuple[str, str]] = []   # every (system_prompt, prompt) it was handed
 
-    def complete(self, messages: list[dict], **overrides) -> str:
+    def __call__(self, prompt: str, system_prompt: str | None = None,
+                 max_tokens: int | None = None, temperature: float | None = None) -> str:
         self.calls += 1
-        self.seen.append(messages)
+        self.seen.append((system_prompt or "", prompt))
 
         if self.fail_every and self.calls % self.fail_every == 0:
             raise RuntimeError("canned failure")
 
         # The vote runs on its own system prompt, with no persona in it
-        system = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
-        if system.startswith("Sei un analista"):
+        if (system_prompt or "").startswith("Sei un analista"):
             return self.vote
 
         return next(self.pool)

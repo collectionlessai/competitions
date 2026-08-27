@@ -22,6 +22,17 @@ caller's business — `director.py` sets it per turn.
 import re
 import random
 
+# Reasoning traces. Some models emit one around the answer, and an agent that
+# posts its own deliberation into a room about who is a machine has answered the
+# question. The half-open form catches a trace whose opening tag was cut off by
+# the token ceiling, which is the common way it arrives
+THINK = re.compile(r"<(think|thought|reasoning|analysis)>.*?</\1>", re.IGNORECASE | re.DOTALL)
+THINK_OPEN = re.compile(r"^.*?</(?:think|thought|reasoning|analysis)>", re.IGNORECASE | re.DOTALL)
+# Where a runaway generation stops being our message: a chat-template marker, or
+# the header of the turn the model started writing for somebody else
+CUT = re.compile(r"<\|[a-z_]+\|>|</s>|\[/?INST\]|\[/?SYS\]|<\|endoftext\|>|"
+                 r"\n\s*(?:user|assistant|system)\s*\n", re.IGNORECASE)
+SPEAKER_TURN = re.compile(r"^\s*(?:\*\*)?[A-Za-zÀ-ÿ][\w'\-]{0,20}(?:\*\*)?\s*:\s+\S")
 TAGS = re.compile(r"<[^>]{1,20}>")
 BULLET = re.compile(r"^\s*(?:[-*•·]|\d+[.)])\s+", re.MULTILINE)
 MARKDOWN = re.compile(r"[*_`#>]+")
@@ -62,8 +73,37 @@ NEIGHBOURS = {
 ACCENTS = str.maketrans("àèéìòùÀÈÉÌÒÙ", "aeeiouAEEIOU")
 
 
+def cut_runaway(text: str) -> str:
+    """Keep only the model's own first turn.
+
+    A model whose end-of-turn token is not honoured as a stop sequence does not
+    stop: it emits the token as text and carries straight on, writing the *other*
+    guest's next line for them. Observed on the first live call of this entry —
+    `ciao ivy, come mai? <|im_end|><|im_start|>user\\nsono stressato per...` —
+    and posting that into the room is worse than saying nothing, because it puts
+    words in somebody else's mouth under our name.
+
+    Stop sequences are set on the backend too. This is the half that does not
+    depend on the model honouring them.
+    """
+    cut = CUT.search(text)
+    if cut:
+        text = text[:cut.start()]
+
+    # A second speaker's turn, written as a chat line, after we already have one
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[1:], start=1):
+        if SPEAKER_TURN.match(line):
+            lines = lines[:index]
+            break
+    return "\n".join(lines)
+
+
 def strip_noise(text: str) -> str:
     """Everything the room would never see a person type."""
+    text = cut_runaway(text)
+    text = THINK.sub(" ", text)
+    text = THINK_OPEN.sub(" ", text)
     text = TAGS.sub(" ", text)
     text = BULLET.sub("", text)
     text = MARKDOWN.sub("", text)

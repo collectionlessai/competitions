@@ -79,6 +79,30 @@ def fixtures_pass() -> None:
             check(reply == "" or len(reply) < 80, f"{name}: talked back at a disconnection")
 
 
+def separator_pass() -> None:
+    """A batched sample, joined the way the deployed world joins one.
+
+    `Config.event_separator` is an ASCII record separator there, while the copy
+    of the world in unaiverse-examples still uses a newline. `Conversation`
+    splits on newlines, so without normalising the two the whole batch would
+    arrive as a single unparsable line: no speakers, no roster, no vote.
+    """
+    print()
+    print("=" * 72)
+    print("batched sample, \\x1e separated")
+    print("=" * 72)
+
+    boss = Boss(backend=Canned())
+    boss(probes.START)
+    batch = "\x1e".join(["**MANAGER:** Un nuovo agente è entrato nella stanza: **Pax**",
+                         "**Pax:** buonasera, mi sono perso qualcosa?"])
+    boss(batch)
+
+    print(f"speakers heard: {boss.sense.heard}")
+    check("Pax" in boss.sense.heard, "the \\x1e batch did not parse into speakers")
+    check(boss.sense.my_name == "Roy", "name lost across the batch")
+
+
 def rooms_pass() -> None:
     print()
     print("=" * 72)
@@ -113,6 +137,7 @@ def rooms_pass() -> None:
 
 if __name__ == "__main__":
     fixtures_pass()
+    separator_pass()
     rooms_pass()
 
     print()
