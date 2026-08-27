@@ -127,6 +127,11 @@ class FeatherlessBackend:
     Args:
         model: the model id, which on Featherless is its Hugging Face repo name.
         cost: the gateway's unit price, or None to guess it from the model id.
+        fallback: model id, or list of them, to try when this one fails. The
+            small Italian fine-tunes are the ones worth having a persona on and
+            also the ones that answer `503 capacity_exhausted` under load, which
+            in a 300-second room means a guest who says "aspe" and nothing else.
+            Each is built on first use, so an unused fallback costs nothing.
         max_tokens, temperature, top_p, top_k, repetition_penalty: the defaults
             for every call, each overridable per call where the caller passes one.
         **kwargs: forwarded to `FeatherlessAPI` (`min_p`, `sampler`, ...).
@@ -134,9 +139,16 @@ class FeatherlessBackend:
 
     def __init__(self, model: str, cost: int | None = None, max_tokens: int = 60,
                  temperature: float = 0.95, top_p: float = 0.95, top_k: int = 60,
-                 repetition_penalty: float = 1.08, stop: list | None = None, **kwargs):
+                 repetition_penalty: float = 1.08, stop: list | None = None,
+                 fallback: str | list | None = None, **kwargs):
         self.model = model
         self.no_system = False       # set on the first "system role not supported"
+
+        self.fallback_models = [fallback] if isinstance(fallback, str) else list(fallback or [])
+        self._fallbacks: list = []   # built lazily, in order, on first failure
+        self._settings = dict(cost=None, max_tokens=max_tokens, temperature=temperature,
+                              top_p=top_p, top_k=top_k,
+                              repetition_penalty=repetition_penalty, stop=stop, **kwargs)
 
         sampler = dict(kwargs.pop("sampler", None) or {})
         sampler.setdefault("stop", STOP if stop is None else stop)
@@ -164,11 +176,30 @@ class FeatherlessBackend:
         try:
             return self._generate(prompt, system_prompt, max_tokens, temperature)
         except Exception as e:
-            merged = bool(system_prompt) and (NO_SYSTEM.search(str(e)) or BAD_REQUEST.search(str(e)))
-            if not merged:
-                raise
-            self.no_system = True
-            return self._generate(f"{system_prompt}\n\n{prompt}", "", max_tokens, temperature)
+            merge = bool(system_prompt) and (NO_SYSTEM.search(str(e)) or BAD_REQUEST.search(str(e)))
+            if merge:
+                self.no_system = True
+                try:
+                    return self._generate(f"{system_prompt}\n\n{prompt}", "",
+                                          max_tokens, temperature)
+                except Exception as retried:
+                    e = retried
+
+            for backend in self._fallback_chain():
+                try:
+                    return backend(prompt, system_prompt, max_tokens, temperature)
+                except Exception:
+                    continue
+            raise e
+
+    def _fallback_chain(self):
+        """The fallback backends, built on first use and then reused."""
+        while len(self._fallbacks) < len(self.fallback_models):
+            name = self.fallback_models[len(self._fallbacks)]
+            settings = dict(self._settings)
+            settings.pop("cost", None)
+            self._fallbacks.append(FeatherlessBackend(model=name, **settings))
+        return self._fallbacks
 
     def _generate(self, prompt: str, system_prompt: str | None,
                   max_tokens: int | None, temperature: float | None) -> str:

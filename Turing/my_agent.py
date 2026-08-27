@@ -47,16 +47,22 @@ NODE_NAME = "TuringBoss"
 # swap in "MyTuringHotel" to play against the local world in unaiverse-examples.
 WORLD = "stefano.melacci@unisi.it/TuringHotelItaly"
 
-# The model behind the persona. Run `python -m bench.run_bench` to compare the
-# shortlist on the Italian register, the latency and how each one holds up under
-# probing, then put the winner here.
-MODEL = os.environ.get("BOSS_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+# The model behind the persona. Run `python -m bench.run_bench --always-speak` to
+# compare the shortlist on the Italian register, the latency and how each one
+# holds up under probing, then put the winner here.
+MODEL = os.environ.get("BOSS_MODEL", "swap-uniba/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA")
+
+# Where to go when the model above will not answer. The Italian fine-tunes are
+# the ones worth a persona and also the ones that return 503 capacity_exhausted
+# under load, which across a 300-second room is a guest who only ever says
+# "aspe". The fallback is built on first use, so it costs nothing until needed.
+FALLBACK = os.environ.get("BOSS_FALLBACK", "Qwen/Qwen2.5-32B-Instruct")
 
 
 # WHAT TO SAY. A persona drawn fresh each room, a director that decides what kind
 # of turn this is, and a pass that takes the model back out of the answer.
 
-proc = Boss(model=MODEL, max_tokens=60, temperature=0.95,
+proc = Boss(model=MODEL, fallback=FALLBACK, max_tokens=60, temperature=0.95,
             top_p=0.95, top_k=60, repetition_penalty=1.08)
 
 # WHEN TO SAY IT. Delay proportional to what was read and written, under a mood

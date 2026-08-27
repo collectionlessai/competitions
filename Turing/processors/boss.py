@@ -93,6 +93,9 @@ class Boss(torch.nn.Module):
         keep: how many messages of history to hold, passed to `Conversation`.
         director: a configured `Director`, or None for the defaults.
         max_tokens: hard ceiling on the reply, before `humanise` trims it further.
+        **sampler: passed to the backend when one is built here. `fallback=` (a
+            model id, or a list of them) is the one worth knowing about: it is
+            what answers when the chosen model returns 503 under load.
     """
 
     def __init__(self, model: str = "Qwen/Qwen2.5-72B-Instruct", backend=None,
