@@ -53,6 +53,9 @@ STOP = ["<|im_end|>", "<|im_start|>", "<|eot_id|>", "</s>", "<|endoftext|>", "[I
 # Not every chat template has a system turn. Gemma's does not, and the API says
 # so with a 400 rather than by ignoring it, which fails the whole call
 NO_SYSTEM = re.compile(r"system role not supported|system.{0,24}not supported", re.IGNORECASE)
+# Families known to have no system turn, so the first call does not have to fail
+# to find out. The runtime detection below still covers everything else
+NO_SYSTEM_MODELS = re.compile(r"gemma", re.IGNORECASE)
 BAD_REQUEST = re.compile(r"bad_request|invalid_request|rejected as invalid", re.IGNORECASE)
 
 
@@ -142,7 +145,9 @@ class FeatherlessBackend:
                  repetition_penalty: float = 1.08, stop: list | None = None,
                  fallback: str | list | None = None, **kwargs):
         self.model = model
-        self.no_system = False       # set on the first "system role not supported"
+        # Set here for the families that are known, and on the first rejection
+        # for the ones that are not
+        self.no_system = bool(NO_SYSTEM_MODELS.search(model))
 
         self.fallback_models = [fallback] if isinstance(fallback, str) else list(fallback or [])
         self._fallbacks: list = []   # built lazily, in order, on first failure
