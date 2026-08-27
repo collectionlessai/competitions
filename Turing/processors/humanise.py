@@ -234,6 +234,35 @@ def is_assistant(text: str) -> bool:
     return bool(ASSISTANT.search(text))
 
 
+# What an Italian chat message is made of. Anything else — CJK punctuation, box
+# drawing, stray closing brackets, leftover template scraps — is a small model
+# coming apart, and one `]1 emojis:|` in a room ends the game on the spot
+ALLOWED = re.compile(r"[A-Za-zÀ-ÿ0-9\s.,;:!?'\"()\-–—…«»/%&+=@#°àèéìòù]")
+BROKEN_BITS = re.compile(r"[\[\]{}<>|\\^~`_]|\b(?:Finish|Output|Answer|Note|emojis?)\b",
+                         re.IGNORECASE)
+
+
+def looks_broken(text: str) -> bool:
+    """True when the generation degenerated rather than said something.
+
+    Two signals, both cheap. A character an Italian keyboard does not produce,
+    and the debris small models leave when they lose the thread — brackets,
+    pipes, and the English scaffolding words that belong to a template rather
+    than to a conversation.
+
+    Observed on `LLaMAntino-3-ANITA-8B` across a full seven-room run: `non
+    faccio nulla di quello che dite 】`, `no ho tempo per questo ]1 emojis:|`.
+    Cheaper to throw the message away than to send it.
+    """
+    if not text:
+        return False
+    stripped = EMOJI.sub("", text)
+    if not stripped.strip():
+        return False
+    foreign = sum(1 for c in stripped if not ALLOWED.match(c))
+    return foreign > 0 or bool(BROKEN_BITS.search(stripped))
+
+
 def deflect() -> str:
     return random.choice(DEFLECTIONS)
 

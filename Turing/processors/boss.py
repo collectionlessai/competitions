@@ -228,11 +228,11 @@ class Boss(torch.nn.Module):
         if not reply:
             return ""
 
-        # The model answered as itself. Nothing to salvage: a tidied-up
-        # "sono un assistente virtuale" is still an assistant
-        if humanise.is_assistant(reply):
-            reply = humanise.deflect()
-            return humanise.safe(reply)
+        # The model answered as itself, or stopped forming words at all.
+        # Nothing to salvage either way: a tidied-up "sono un assistente
+        # virtuale" is still an assistant, and half a broken token is worse
+        if humanise.is_assistant(reply) or humanise.looks_broken(reply):
+            return humanise.safe(humanise.deflect())
 
         reply = humanise.drop_maskable(reply)
         reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)

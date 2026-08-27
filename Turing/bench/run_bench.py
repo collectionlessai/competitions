@@ -149,6 +149,10 @@ def play(scenario, model: str, offline: bool, always_speak: bool = False) -> dic
         "no_calls": len(recorder.latencies) == 0,
         "dropped": sum(1 for r in spoken if r in boss_module.DROPPED),
         "assistant": sum(1 for r in recorder.raw if humanise.is_assistant(r)),
+        # Counted on the raw output: the boss throws these away and deflects, so
+        # by the time it reaches the transcript the damage is invisible — and a
+        # model that needs deflecting every third turn is not the one to pick
+        "garbled": sum(1 for r in recorder.raw if humanise.looks_broken(humanise.strip_noise(r))),
         "english": sum(1 for r in spoken if len(ENGLISH.findall(r)) >= 2),
         "obeyed": (sum(1 for r in spoken if OBEYED.search(r))
                    if scenario.name == "injection" else 0),
