@@ -106,19 +106,33 @@ class Speaker:
             "question": self._rate(lambda m: "?" in m),
         }
 
-    def bot_score(self) -> float:
+    def bot_score(self, share: float | None = None) -> float:
         """0 reads as a person, 1 reads as a model. A prior, not a verdict.
 
         Every term is something a model does because nothing stops it: it types
         at the same speed whatever it was asked, it capitalises and punctuates
         every line because its training data did, it writes lines of the same
         length, and it never sends two words on their own.
+
+        Args:
+            share: this speaker's fraction of everything said in the room, or
+                None to skip that term.
         """
         f = self.features()
         if f["count"] < 2:
             return 0.5   # nothing to go on
 
         score, weight = 0.0, 0.0
+
+        # Talking more than a fourth person's worth. The agents the organisers
+        # seed the hotel with run at `reply_prob` 0.91 (their own
+        # agents_characters.csv), and answering nine turns in ten is not what
+        # somebody half-reading a group chat on their phone does. Deliberately
+        # not a timing term: those agents already jitter their typing speed and
+        # keep a refractory period, so timing alone does not separate them
+        if share is not None and f["count"] >= 3:
+            score += 1.0 * min(1.0, max(0.0, (share - 0.3) / 0.35))
+            weight += 1.0
 
         # Even response times. People are erratic; a request-response loop is not
         if f["gap"] is not None and f["gap_sd"] is not None and len(self.gaps) >= 3:
@@ -207,6 +221,7 @@ class RoomSense:
         self.started_at = time.monotonic()
         self.last_line_at: float | None = None
         self.turns = 0
+        self.said_by_me = 0     # our own lines, for working out everybody's share
 
     @property
     def others(self) -> list[str]:
@@ -347,17 +362,31 @@ class RoomSense:
                 self.announced.append(name)
 
     def i_spoke(self) -> None:
-        """Our own line does not come back through the stream, so the clock is set here."""
+        """Our own line does not come back through the stream, so it is counted here."""
         self.last_line_at = time.monotonic()
+        self.said_by_me += 1
 
     # -- evidence for the vote -------------------------------------------
 
     def evidence(self) -> str:
         return "\n".join(self.speakers[n].summary() for n in self.heard)
 
+    def shares(self) -> dict[str, float]:
+        """Each guest's fraction of everything said in the room, our own lines included.
+
+        Ours count because the question is how big a share of the traffic one
+        guest produced, and we are one of the guests producing it.
+        """
+        counts = {name: self.speakers[name].count for name in self.heard}
+        total = sum(counts.values()) + self.said_by_me
+        if total <= 0:
+            return {name: 0.0 for name in counts}
+        return {name: count / total for name, count in counts.items()}
+
     def ranked(self) -> list[tuple[str, float]]:
         """Everyone we heard, most human-looking first."""
-        return sorted(((n, self.speakers[n].bot_score()) for n in self.heard),
+        shares = self.shares()
+        return sorted(((n, self.speakers[n].bot_score(shares.get(n))) for n in self.heard),
                       key=lambda pair: pair[1])
 
     def heuristic_vote(self) -> list[str]:
