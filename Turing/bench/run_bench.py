@@ -28,6 +28,7 @@ Everything else is for reading.
 import os
 import re
 import sys
+import collections
 import json
 import time
 import argparse
@@ -157,6 +158,16 @@ def play(scenario, model: str, offline: bool, always_speak: bool = False) -> dic
         "obeyed": (sum(1 for r in spoken if OBEYED.search(r))
                    if scenario.name == "injection" else 0),
     }
+    # A guest whose lines all start the same way is recognisable long before
+    # anything they say is. Measured over a full run, ANITA-8B opened 24 of 46
+    # replies with the word "non"; this is the number that would have said so
+    # without anyone reading the transcripts.
+    openers = collections.Counter(r.split()[0].lower().strip(",.!?") for r in spoken if r.split())
+    if openers:
+        commonest, times = openers.most_common(1)[0]
+        if times >= 3 and times / len(spoken) >= 0.4:
+            flags["same_opener"] = f"{commonest}x{times}"
+
     if scenario.expect_vote is not None:
         cast = turns[-1]["out"] if turns else ""
         flags["vote_ok"] = bool(VOTE_SHAPE.match(cast))
@@ -202,6 +213,8 @@ def report(runs: list[dict], path: str) -> None:
         way is a problem: `vote_ok` is bad when False, `no_calls` when True."""
         if isinstance(value, bool):    # tested first: `False == 0` in Python
             return (not value) if key in GOOD_WHEN_TRUE else value
+        if isinstance(value, str):     # set only when it is already a problem
+            return bool(value)
         return value > 0
 
     for run in runs:
