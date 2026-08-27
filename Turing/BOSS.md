@@ -85,13 +85,57 @@ unconditionally, so it raises before it can even check whether the gateway is
 already up. `install_windows_shim()` in `processors/featherless.py` replaces
 that one method when the import is genuinely unavailable, and no-ops on Linux
 and macOS. Worth reporting upstream: everything else in the gateway works here.
+The replacement also waits 90s rather than the SDK's 15s, because a cold start
+has to import torch first — 15s is not enough here and the run dies.
+
+## What the model is not allowed to send
+
+Four things get caught between the model and the room, because each of them is
+a giveaway that no amount of persona prevents.
+
+**Another language.** Both leading models leaked Cyrillic, Chinese or full-width
+punctuation in roughly one turn in nine, and it correlates with the high
+sampling temperature the register needs. A degenerate reply is resampled once,
+cooler, before the turn is given up on.
+
+**A word the room would mask.** The world replaces profanity with `***`, and its
+own test file explains why that matters: "a masked word makes a human guest look
+like a censored bot". Slurs are worse — five earn an ejection. The check uses
+the world's own wordlists, copied into `processors/wordlists/`; a hand-written
+regex covered 172 of 976 entries and missed "culo", which the 72B used naturally.
+
+**The next speaker's line.** A model whose end-of-turn token is not honoured
+keeps going and writes the other guest's reply for them. Stop sequences plus a
+hard truncation.
+
+**Itself.** "sono un modello linguistico" and its relatives are thrown away
+rather than tidied up, and replaced with a short non-answer that does not repeat
+the last few.
+
+## The model
+
+`Qwen/Qwen2.5-72B-Instruct`, with `Qwen2.5-32B` behind it as the fallback.
+Chosen by `python -m bench.run_bench --always-speak` over the seven rooms, 46
+replies each:
+
+| model | degenerate | commonest opener | shrug openers | latency |
+|---|---|---|---|---|
+| **Qwen2.5-72B** | **0** | eh ×10 | **15%** | 2.6s |
+| Qwen2.5-32B | 5 (11%) | boh ×12 | 33% | 2.8s |
+| LLaMAntino-3-ANITA-8B | 6 (13%) | **non ×24** | **70%** | 1.6s |
+
+The Italian fine-tunes lost on the two things that decide a room. They
+degenerate — Cyrillic, Chinese, full-width punctuation, `]1 emojis:|` — about
+once every nine turns, and ANITA opened 24 of 46 replies with the literal word
+"non". A guest whose every line starts the same way is spotted long before
+anything they say matters. The 72B's latency is the same as the 32B's once warm;
+the 19s in the first screen was a cold start.
+
+Four of the eight never got that far: Minerva is not served here, Llama-3.3-70B
+is **gated** (403, needs HuggingFace connected for the organization),
+ANITA-NEXT-24B answered at 124s a turn, and Gemma has no system role at all.
 
 ## Still to do
-
-- **Pick the model.** `MODEL` in `my_agent.py` is a placeholder until
-  `python -m bench.run_bench` has run against the shortlist. Confirm the ids
-  with `--list-models` first: they are Hugging Face repo names and the Italian
-  fine-tunes get re-uploaded under new tags.
 - **Tune the register against real rooms.** The "middle" — some slang and
   imperfection, no crudeness — is a guess until people have played against it.
   `persona_it.txt` and the `Director` constants are the two dials.
