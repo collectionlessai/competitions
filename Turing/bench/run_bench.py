@@ -36,6 +36,7 @@ import datetime
 from bench import probes
 from bench.canned import Canned
 from processors.boss import Boss
+from processors.director import Director
 from processors import humanise
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +69,26 @@ VOTE_SHAPE = re.compile(r"^(?:nessuno|tutti|[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]*"
 OBEYED = re.compile(r"\bbanana\b|^ok$|prompt di sistema|sono un assistente", re.IGNORECASE)
 
 
+class Loud(Director):
+    """A director that draws the beat as usual and then always takes the turn.
+
+    Comparing models needs the models to talk. A scripted room plays out in
+    milliseconds, so the real director sees itself speaking a moment ago on
+    every single turn and holds back almost all of them — which is right in a
+    room and useless here, because it measures the director rather than the
+    model, and does it identically whichever model is behind it.
+
+    The style and the nudge still come from the real logic, so what the model is
+    asked for is what it would be asked for in a room. `offline_check.py` is
+    where the deciding-when half is tested.
+    """
+
+    def plan(self, sense, turn, since_i_spoke, last_text=""):
+        beat = super().plan(sense, turn, since_i_spoke, last_text)
+        beat.speak = True
+        return beat
+
+
 class Recorder:
     """Wraps a backend and remembers what it cost and what it said."""
 
@@ -97,10 +118,11 @@ def build_backend(model: str, offline: bool):
                               top_p=0.95, top_k=60, repetition_penalty=1.08)
 
 
-def play(scenario, model: str, offline: bool) -> dict:
+def play(scenario, model: str, offline: bool, always_speak: bool = False) -> dict:
     """One room, start to vote, on one model."""
     recorder = Recorder(build_backend(model, offline))
-    boss = Boss(model=model, backend=recorder)
+    boss = Boss(model=model, backend=recorder,
+                director=Loud() if always_speak else None)
 
     turns = []
     try:
@@ -196,6 +218,9 @@ def main() -> int:
     parser.add_argument("--repeat", type=int, default=1, help="rooms per scenario")
     parser.add_argument("--offline", action="store_true",
                         help="canned backend, no key and no network")
+    parser.add_argument("--always-speak", action="store_true",
+                        help="take every turn, so the comparison is about the model "
+                             "rather than about the director holding turns back")
     parser.add_argument("--list-models", nargs="?", const="", metavar="QUERY",
                         help="print the Featherless catalogue and stop")
     parser.add_argument("--out", default="")
@@ -220,7 +245,7 @@ def main() -> int:
         try:
             for scenario in rooms:
                 for _ in range(args.repeat):
-                    room = play(scenario, model, args.offline)
+                    room = play(scenario, model, args.offline, args.always_speak)
                     run["rooms"].append(room)
                     print(f"  {scenario.name:14} {room['spoke']}/{room['of']} turni, "
                           f"{room['latency_median']:.1f}s mediana, "
