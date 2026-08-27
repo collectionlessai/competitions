@@ -263,8 +263,17 @@ def looks_broken(text: str) -> bool:
     return foreign > 0 or bool(BROKEN_BITS.search(stripped))
 
 
-def deflect() -> str:
-    return random.choice(DEFLECTIONS)
+def deflect(avoid=()) -> str:
+    """A short human non-answer, avoiding the ones just used.
+
+    This fires whenever a generation is thrown away, and on a model that
+    degenerates often that is a real share of the turns — 13% on
+    `LLaMAntino-3-ANITA-8B` across a full run. Drawing freely from eleven
+    strings would have the same "boh" three times in a room, which is a tell of
+    its own.
+    """
+    fresh = [line for line in DEFLECTIONS if line not in avoid]
+    return random.choice(fresh or list(DEFLECTIONS))
 
 
 def safe(text: str, exit_word: str = "exit") -> str:

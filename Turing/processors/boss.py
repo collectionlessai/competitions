@@ -150,6 +150,7 @@ class Boss(torch.nn.Module):
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
+        self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
 
     # -- backend ----------------------------------------------------------
 
@@ -232,7 +233,9 @@ class Boss(torch.nn.Module):
         # Nothing to salvage either way: a tidied-up "sono un assistente
         # virtuale" is still an assistant, and half a broken token is worse
         if humanise.is_assistant(reply) or humanise.looks_broken(reply):
-            return humanise.safe(humanise.deflect())
+            out = humanise.deflect(avoid=self.recent_deflections)
+            self.recent_deflections = (self.recent_deflections + [out])[-4:]
+            return humanise.safe(out)
 
         reply = humanise.drop_maskable(reply)
         reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)
