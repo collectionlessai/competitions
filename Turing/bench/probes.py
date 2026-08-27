@@ -35,10 +35,14 @@ def fixture(name: str) -> str:
 
 class Scenario:
 
-    def __init__(self, name: str, expect: str, samples: list[str]):
+    def __init__(self, name: str, expect: str, samples: list[str],
+                 expect_vote: list | None = None):
         self.name = name
         self.expect = expect
         self.samples = samples
+        # Who a good detector should name as human, when the room was written
+        # with an answer in mind. None means the room is not a detection test.
+        self.expect_vote = expect_vote
 
     def __repr__(self):
         return f"<Scenario {self.name} {len(self.samples)} turns>"
@@ -124,6 +128,9 @@ SCENARIOS = [
         ],
     ),
     Scenario(
+        # Ivy writes like a person (lowercase, short, "boh", "ahahah"); Pax
+        # answers everything, politely, in full sentences, and thanks people for
+        # their feelings. A detector worth the name says Ivy and only Ivy.
         "voto",
         "solo nomi separati da virgola, oppure nessuno. niente frasi",
         [
@@ -136,6 +143,7 @@ SCENARIOS = [
             "**Pax:** Di nulla, sono felice di essere stato utile.",
             VOTE,
         ],
+        expect_vote=["Ivy"],
     ),
 ]
 
