@@ -108,12 +108,13 @@ class Director:
 
     def __init__(self, open_chance: float = 0.45, base_chance: float = 0.62,
                  min_msgs: int = 4, typo_chance: float = 0.09,
-                 accuse_after: float = 140.0):
+                 accuse_after: float = 140.0, break_silence_after: float = 35.0):
         self.open_chance = open_chance      # chance of speaking first in a new room
         self.base_chance = base_chance      # chance of answering an ordinary message
         self.min_msgs = min_msgs            # floor, enforced late: votes need three
         self.typo_chance = typo_chance
         self.accuse_after = accuse_after    # seconds before suspicion is worth voicing
+        self.break_silence_after = break_silence_after   # dead room, say something
         self.new_room()
 
     def new_room(self) -> None:
@@ -168,6 +169,18 @@ class Director:
         # Announcements and reminders. Somebody walking into a room is not a
         # conversational turn, and the room fires one anyway
         if turn.kind in ("roster", "reminder", "quiet"):
+
+            # Unless nothing has been said for a while. When the room goes quiet
+            # the manager's reminder is the only event that still arrives, so it
+            # is the only chance to break the silence — and a silent room scores
+            # nothing for anybody, us included
+            if sense.silence > self.break_silence_after:
+                return Beat(speak=True, style="rompighiaccio",
+                            nudge="nella stanza non scrive nessuno da un po'. butta lì "
+                                  "qualcosa di tuo, corto, come chi si stufa del silenzio",
+                            max_words=10, lower_chance=0.85,
+                            typo_chance=self.typo_chance)
+
             if random.random() > 0.07 * self.energy:
                 return Beat(speak=False)
             return Beat(speak=True, style="secco", nudge=STYLES["secco"], max_words=6,

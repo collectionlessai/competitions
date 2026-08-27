@@ -241,6 +241,19 @@ class RoomSense:
     def elapsed(self) -> float:
         return time.monotonic() - self.started_at
 
+    @property
+    def silence(self) -> float:
+        """Seconds since anybody said anything, our own lines included.
+
+        A room where everybody is being tactfully quiet is a room where nobody
+        can be voted on: a vote about a guest who sent fewer than three messages
+        is thrown away, and the Turing score is scaled by how much was said. The
+        only thing that reaches a processor while the room is silent is the
+        manager's periodic reminder, so that is where the ice has to be broken.
+        """
+        since = self.last_line_at if self.last_line_at is not None else self.started_at
+        return time.monotonic() - since
+
     # -- reading ----------------------------------------------------------
 
     def _is_manager(self, speaker: str) -> bool:
