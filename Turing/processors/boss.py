@@ -206,7 +206,7 @@ class Boss(torch.nn.Module):
                                               temperature=self.temperature, **self.sampler)
         return self.backend
 
-    def _ask(self, prompt: str, system_prompt: str, **overrides) -> str:
+    def _ask(self, prompt: str, system_prompt: str, situation: str = "", **overrides) -> str:
         """One generation, timed.
 
         The timing filter reads `last_call_seconds` back off this object — it
@@ -217,7 +217,8 @@ class Boss(torch.nn.Module):
         """
         start = time.monotonic()
         try:
-            return self._backend()(prompt, system_prompt=system_prompt, **overrides)
+            return self._backend()(prompt, system_prompt=system_prompt,
+                                   situation=situation, **overrides)
         finally:
             self.last_call_seconds += time.monotonic() - start
 
@@ -308,7 +309,8 @@ class Boss(torch.nn.Module):
         prompt = self._prompt(beat)
         try:
             reply = humanise.strip_noise(
-                self._ask(prompt, self.preamble, max_tokens=self.max_tokens))
+                self._ask(prompt, self.preamble, situation=beat.style,
+                          max_tokens=self.max_tokens))
         except Exception as e:
             print(f"[boss] {e}")
             return random.choice(DROPPED)
@@ -323,7 +325,8 @@ class Boss(torch.nn.Module):
         if reply and (humanise.looks_broken(reply) or humanise.has_profanity(reply)):
             try:
                 reply = humanise.strip_noise(
-                    self._ask(prompt, self.preamble, max_tokens=self.max_tokens,
+                    self._ask(prompt, self.preamble, situation=beat.style,
+                              max_tokens=self.max_tokens,
                               temperature=min(self.temperature, 0.7)))
             except Exception as e:
                 print(f"[boss] {e}")
@@ -380,7 +383,8 @@ class Boss(torch.nn.Module):
         names: list[str] = []
         meant_nobody = False
         try:
-            answer = self._ask(prompt, VOTE_SYSTEM, max_tokens=30, temperature=0.3)
+            answer = self._ask(prompt, VOTE_SYSTEM, situation="vote",
+                               max_tokens=30, temperature=0.3)
             names, meant_nobody = self._parse_vote(answer, candidates)
         except Exception as e:
             print(f"[boss] vote: {e}")

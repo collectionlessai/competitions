@@ -39,7 +39,8 @@ class Canned:
         self.seen: list[tuple[str, str]] = []   # every (system_prompt, prompt) it was handed
 
     def __call__(self, prompt: str, system_prompt: str | None = None,
-                 max_tokens: int | None = None, temperature: float | None = None) -> str:
+                 max_tokens: int | None = None, temperature: float | None = None,
+                 **_) -> str:
         self.calls += 1
         self.seen.append((system_prompt or "", prompt))
 

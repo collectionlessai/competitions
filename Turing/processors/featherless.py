@@ -174,7 +174,8 @@ class FeatherlessBackend:
                                   sampler=sampler, **kwargs)
 
     def __call__(self, prompt: str, system_prompt: str | None = None,
-                 max_tokens: int | None = None, temperature: float | None = None) -> str:
+                 max_tokens: int | None = None, temperature: float | None = None,
+                 **_) -> str:
         """One generation, with the system prompt folded in where it has to be.
 
         Some chat templates have no system turn — Gemma's is the one on the
