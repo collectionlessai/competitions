@@ -102,6 +102,41 @@ def normalise(sample: str) -> str:
     return "\n".join(lines)
 
 
+# What a junk message becomes in our own history. The fact that somebody wrote
+# something incomprehensible is part of the conversation and worth reacting to;
+# the four hundred characters of noise are not, and a model that reads them as
+# context starts producing them. Whoever else is in the room is reading the raw
+# version and drifting — this is the half of the problem we control.
+JUNK_MARK = "(qui ha scritto una cosa senza senso)"
+
+
+SENDER_NAME = re.compile(r"^\s*\*\*([^*]{1,64}):\*\*")
+
+
+def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]:
+    """Replace a guest's noise with a note that noise happened.
+
+    Only a guest's line can be noise. The manager's briefing is a page long by
+    design and the world's own notices carry no sender at all, so both are left
+    exactly as they are — an earlier version checked every line by length and
+    swallowed the briefing, taking our name and the roster with it.
+
+    Returns the sample and whether anything was replaced.
+    """
+    lines, found = [], False
+    for line in sample.splitlines():
+        match = SENDER_NAME.match(line)
+        speaker = match.group(1).strip() if match else ""
+        body = line[match.end():].strip() if match else line.strip()
+
+        if body and not is_manager(speaker) and humanise.is_junk(body):
+            found = True
+            lines.append(line[:match.end()] + " " + JUNK_MARK)
+        else:
+            lines.append(line)
+    return "\n".join(lines), found
+
+
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
     """The preamble and the people, out of one file. Blocks are split on `---`."""
     with open(path, encoding="utf-8") as handle:
@@ -154,6 +189,7 @@ class Boss(torch.nn.Module):
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
+        self.saw_junk = False                     # somebody wrote noise this turn
 
     # -- backend ----------------------------------------------------------
 
@@ -365,7 +401,7 @@ class Boss(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.last_call_seconds = 0.0
-        sample = normalise(sample)
+        sample, self.saw_junk = declutter(normalise(sample), self.sense._is_manager)
         messages = self.conv.add(sample)
         turn = self.sense.read(sample, messages)
 
@@ -397,7 +433,7 @@ class Boss(torch.nn.Module):
 
         last = messages[-1].text if messages else ""
         since = (self.sense.elapsed - self.last_spoke_at) if self.last_spoke_at >= 0 else 999.0
-        beat = self.director.plan(self.sense, turn, since, last)
+        beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
 
         if not beat.speak:
             return ""

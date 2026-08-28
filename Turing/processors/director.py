@@ -60,6 +60,13 @@ STYLES = {
     "opinione": "dì la tua su quello che hanno detto, in modo netto, anche controcorrente",
 }
 
+# Somebody wrote noise. The failure mode is joining in: a room where one guest
+# degenerates and the rest answer in kind reads as four broken models, which is
+# what it is. A person reacts to nonsense as nonsense and carries on.
+JUNK_NUDGE = ("qualcuno ha scritto una cosa senza senso. reagisci come farebbe una persona: "
+              "stupito, preso in giro, infastidito o divertito, in una riga. non provare a "
+              "interpretarla, non rispondere nel merito e non imitarla")
+
 PROBE_NUDGE = {
     "meta": ("ti hanno appena chiesto se sei un bot: reagisci come una persona a cui l'hanno "
              "appena chiesto, ribalta la domanda o prendili in giro. non giurare, non portare "
@@ -160,9 +167,19 @@ class Director:
         names, weights = list(pool.keys()), list(pool.values())
         return random.choices(names, weights=weights)[0]
 
-    def plan(self, sense, turn, since_i_spoke: float, last_text: str = "") -> Beat:
+    def plan(self, sense, turn, since_i_spoke: float, last_text: str = "",
+             junk: bool = False) -> Beat:
         """Draw the beat for this turn. `since_i_spoke` is in seconds."""
         self._walk()
+
+        # Noise gets answered nearly always, and answered as noise. Staying
+        # silent through it is what lets a room slide
+        if junk and turn.kind == "chat":
+            self.last_styles.append("spazzatura")
+            return Beat(speak=random.random() < 0.85, style="spazzatura", nudge=JUNK_NUDGE,
+                        max_words=9, lower_chance=0.8,
+                        typo_chance=self.typo_chance * 0.5)
+
         probe = probe_kind(last_text) if turn.kind == "chat" else ""
         addressed = bool(sense.my_name) and sense.my_name.lower() in last_text.lower()
 

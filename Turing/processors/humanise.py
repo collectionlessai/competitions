@@ -103,6 +103,9 @@ NEIGHBOURS = {
     "v": "cb", "w": "qe", "x": "zc", "y": "tu", "z": "x",
 }
 ACCENTS = str.maketrans("àèéìòùÀÈÉÌÒÙ", "aeeiouAEEIOU")
+ALPHABET = "abcdefghilmnopqrstuvz"
+# Share of fat-finger slips that land on a key nowhere near the intended one
+WILD_KEY = 0.15
 
 
 def cut_runaway(text: str) -> str:
@@ -240,10 +243,13 @@ def _typo_word(word: str) -> str:
     if kind == "apostrophe":
         return word.replace("'", " ", 1)
 
+    # Fat finger. Usually the key next to the one meant, which is what a thumb
+    # actually hits; rarely a key from anywhere, which is what happens when the
+    # phone is in one hand and you are not looking at it
     letter = word[i].lower()
-    if letter in NEIGHBOURS:
-        return word[:i] + random.choice(NEIGHBOURS[letter]) + word[i + 1:]
-    return word
+    if random.random() < WILD_KEY or letter not in NEIGHBOURS:
+        return word[:i] + random.choice(ALPHABET) + word[i + 1:]
+    return word[:i] + random.choice(NEIGHBOURS[letter]) + word[i + 1:]
 
 
 def add_typo(text: str) -> tuple[str, str]:
@@ -275,6 +281,35 @@ def is_assistant(text: str) -> bool:
 def masked_words(text: str) -> list[str]:
     """The words in this message the room would replace with asterisks."""
     return [w for w in TOKEN.findall(text.lower()) if w in MASKED_WORDS]
+
+
+# A message nobody typed on purpose. Any one of these on its own is weak; the
+# point is that they are all cheap and none of them fires on ordinary chat.
+FLOOD = re.compile(r"(.)\1{5,}")                       # aaaaaaaa, !!!!!!!!
+NO_VOWEL = re.compile(r"^[^aeiouàèéìòù\s]{9,}$", re.IGNORECASE)
+
+
+def is_junk(text: str) -> bool:
+    """True when an incoming message is noise rather than conversation.
+
+    Somebody pasting garbage, or another guest's model coming apart, is the one
+    thing that reliably drags a whole room down: every agent in it reads the
+    noise as the conversation so far and answers in kind. Worth spotting on the
+    way in, so it can be reacted to rather than imitated.
+    """
+    body = text.strip()
+    if len(body) > 400:
+        return True
+    if not body:
+        return False
+    if looks_broken(body):
+        return True
+    if FLOOD.search(body) or NO_VOWEL.match(body):
+        return True
+
+    # Almost nothing but punctuation and digits
+    letters = sum(1 for c in body if c.isalpha())
+    return letters / len(body) < 0.4 and len(body) > 12
 
 
 def has_profanity(text: str) -> bool:

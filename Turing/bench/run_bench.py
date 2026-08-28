@@ -89,8 +89,8 @@ class Loud(Director):
     where the deciding-when half is tested.
     """
 
-    def plan(self, sense, turn, since_i_spoke, last_text=""):
-        beat = super().plan(sense, turn, since_i_spoke, last_text)
+    def plan(self, *args, **kwargs):
+        beat = super().plan(*args, **kwargs)
         beat.speak = True
         return beat
 
