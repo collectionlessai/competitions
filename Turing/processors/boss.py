@@ -25,6 +25,7 @@ Nothing here branches on a sentence the world sends today.
 
 import os
 import re
+import time
 import random
 
 import torch
@@ -152,6 +153,7 @@ class Boss(torch.nn.Module):
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
         self.recent_openers: list[str] = []       # so every line does not start the same way
+        self.last_call_seconds = 0.0              # read by the timing filter, per turn
 
     # -- backend ----------------------------------------------------------
 
@@ -163,7 +165,19 @@ class Boss(torch.nn.Module):
         return self.backend
 
     def _ask(self, prompt: str, system_prompt: str, **overrides) -> str:
-        return self._backend()(prompt, system_prompt=system_prompt, **overrides)
+        """One generation, timed.
+
+        The timing filter reads `last_call_seconds` back off this object — it
+        reaches us through `opts["agent"].proc.module` — and subtracts it from
+        the typing budget, so how long the model took never shows in the room.
+        A turn that resamples pays for both calls, which is correct: that time
+        was spent too.
+        """
+        start = time.monotonic()
+        try:
+            return self._backend()(prompt, system_prompt=system_prompt, **overrides)
+        finally:
+            self.last_call_seconds += time.monotonic() - start
 
     # -- a new room -------------------------------------------------------
 
@@ -350,6 +364,7 @@ class Boss(torch.nn.Module):
     # -- the contract -----------------------------------------------------
 
     def forward(self, sample: str) -> str:
+        self.last_call_seconds = 0.0
         sample = normalise(sample)
         messages = self.conv.add(sample)
         turn = self.sense.read(sample, messages)

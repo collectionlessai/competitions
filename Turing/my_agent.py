@@ -45,7 +45,7 @@ NODE_NAME = "TuringBoss"
 # A bare name is looked up among your own nodes first, so the organisers' hotel
 # needs their handle in front of it. A copy you run yourself is just its name:
 # swap in "MyTuringHotel" to play against the local world in unaiverse-examples.
-WORLD = "stefano.melacci@unisi.it/TuringHotelItaly"
+WORLD = os.environ.get("BOSS_WORLD", "stefano.melacci@unisi.it/TuringHotelItaly")
 
 # The model behind the persona, chosen by `python -m bench.run_bench
 # --always-speak` over the seven rooms in `bench/probes.py`. Qwen2.5-72B won on
