@@ -35,6 +35,11 @@ from processors.room import RoomSense
 from processors.director import Director
 from processors import humanise
 
+# The world logs the manager's status messages and nothing else, so a room can
+# look silent in the log while chat is flowing normally. Set BOSS_TRACE=1 to see
+# what actually reaches the processor and what it answers.
+TRACE = os.environ.get("BOSS_TRACE", "") not in ("", "0")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PERSONA_FILE = os.path.join(HERE, "persona_it.txt")
 
@@ -421,13 +426,18 @@ class Boss(torch.nn.Module):
         self.last_call_seconds = 0.0
         sample, self.saw_junk = declutter(normalise(sample), self.sense._is_manager)
         messages = self.conv.add(sample)
+        if TRACE:
+            print(f"[boss<-] {sample[:160]!r}", flush=True)
         turn = self.sense.read(sample, messages)
 
         if turn.kind == "start":
             self._new_room()
 
         if turn.kind == "vote":
-            return self._vote()
+            vote = self._vote()
+            if TRACE:
+                print(f"[boss=vote] {vote!r} over {self.sense.heard}", flush=True)
+            return vote
 
         # Out of the booth and back in the hall: nothing we say lands anywhere
         if self.sense.done_voting:
@@ -459,6 +469,9 @@ class Boss(torch.nn.Module):
         reply = self._say(beat, last)
         if not reply:
             return ""
+        if TRACE:
+            print(f"[boss->] {reply!r}  (style={beat.style}, "
+                  f"gen={self.last_call_seconds:.1f}s)", flush=True)
 
         self.conv.remember(reply)
         self._note_opener(reply)
