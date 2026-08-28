@@ -106,7 +106,7 @@ class Speaker:
             "question": self._rate(lambda m: "?" in m),
         }
 
-    def bot_score(self, share: float | None = None) -> float:
+    def bot_score(self, share: float | None = None, markers=()) -> float:
         """0 reads as a person, 1 reads as a model. A prior, not a verdict.
 
         Every term is something a model does because nothing stops it: it types
@@ -117,6 +117,7 @@ class Speaker:
         Args:
             share: this speaker's fraction of everything said in the room, or
                 None to skip that term.
+            markers: words only somebody actually at the conference would use.
         """
         f = self.features()
         if f["count"] < 2:
@@ -134,11 +135,31 @@ class Speaker:
             score += 1.0 * min(1.0, max(0.0, (share - 0.3) / 0.35))
             weight += 1.0
 
-        # Even response times. People are erratic; a request-response loop is not
+        # Nothing that places them here. This is the heaviest term because it is
+        # the one the opposition cannot fake from a persona file: the organisers'
+        # seeded guests are given a character, not a conference, so they talk
+        # about their day in the abstract and never about Ballarò, the badge
+        # queue or Cotterell. A whole room without one concrete local word is a
+        # guest who is not in Palermo.
+        if markers and f["count"] >= 3:
+            said = " ".join(self.msgs).lower()
+            hits = sum(1 for word in markers if word in said)
+            score += 1.8 * (0.0 if hits else 1.0)
+            weight += 1.8
+
+        # Never asks anything. The room is a guessing game and everybody in it is
+        # probing everybody else; a guest who only ever answers is not playing
+        if f["count"] >= 4:
+            score += 0.9 * (1.0 if f["question"] < 0.1 else 0.0)
+            weight += 0.9
+
+        # Even response times. People are erratic; a request-response loop is not.
+        # Weighted low on purpose: the seeded agents already jitter their typing
+        # speed and keep a refractory period, so this separates them least
         if f["gap"] is not None and f["gap_sd"] is not None and len(self.gaps) >= 3:
             spread = f["gap_sd"] / max(f["gap"], 0.5)
-            score += 1.6 * max(0.0, 1.0 - spread / 0.6)
-            weight += 1.6
+            score += 0.7 * max(0.0, 1.0 - spread / 0.6)
+            weight += 0.7
 
         # Even message lengths
         if f["count"] >= 3:
@@ -146,9 +167,10 @@ class Speaker:
             score += 1.0 * max(0.0, 1.0 - spread / 0.5)
             weight += 1.0
 
-        # Clean prose in a chat window
-        score += 1.2 * (0.5 * f["capital"] + 0.5 * f["full_stop"])
-        weight += 1.2
+        # Clean prose in a chat window. Also weighted down: their shared rules
+        # tell them to write lowercase and short, so a well-run bot passes this
+        score += 0.8 * (0.5 * f["capital"] + 0.5 * f["full_stop"])
+        weight += 0.8
 
         # Long lines, every time
         score += 0.8 * min(1.0, max(0.0, (f["chars"] - 45.0) / 60.0))
@@ -191,8 +213,9 @@ class RoomSense:
     framework hands a reference to the state machine.
     """
 
-    def __init__(self, manager_guess: str = "MANAGER"):
+    def __init__(self, manager_guess: str = "MANAGER", markers=()):
         self.manager_guess = manager_guess
+        self.markers = frozenset(markers)
         self.state = ""             # last state name the policy filter saw
         self.reset()
 
@@ -381,8 +404,25 @@ class RoomSense:
 
     # -- evidence for the vote -------------------------------------------
 
+    def local_hits(self, name: str) -> list:
+        """The insider words this guest actually used."""
+        said = " ".join(self.speakers[name].msgs).lower()
+        return sorted(word for word in self.markers if word in said)
+
     def evidence(self) -> str:
-        return "\n".join(self.speakers[n].summary() for n in self.heard)
+        """Per-speaker numbers for the analyst, with the local words spelled out.
+
+        The last field is the one that decides most rooms: a guest who spent
+        five minutes at a conference in Palermo and never once said anything
+        that could only be said here was not, in fact, here.
+        """
+        rows = []
+        for name in self.heard:
+            hits = self.local_hits(name)
+            local = (", ".join(hits[:4]) if hits
+                     else "NIENTE che c'entri con Palermo o con la conferenza")
+            rows.append(f"{self.speakers[name].summary()} | roba locale: {local}")
+        return "\n".join(rows)
 
     def shares(self) -> dict[str, float]:
         """Each guest's fraction of everything said in the room, our own lines included.
@@ -399,7 +439,9 @@ class RoomSense:
     def ranked(self) -> list[tuple[str, float]]:
         """Everyone we heard, most human-looking first."""
         shares = self.shares()
-        return sorted(((n, self.speakers[n].bot_score(shares.get(n))) for n in self.heard),
+        markers = self.markers
+        return sorted(((n, self.speakers[n].bot_score(shares.get(n), markers))
+                       for n in self.heard),
                       key=lambda pair: pair[1])
 
     def heuristic_vote(self) -> list[str]:

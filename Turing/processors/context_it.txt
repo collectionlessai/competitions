@@ -4,12 +4,15 @@
 #
 # Formato:
 #   ## SEMPRE      fatti sempre veri (sede, città, meteo, tormentoni)
-#   ## NOTE        quello che aggiungi TU mentre la conferenza va avanti:
-#                  la gaffe di ieri, la coda al catering, il proiettore rotto,
-#                  la battuta che gira. Una riga per cosa. Aggiungi in fondo.
+#   ## NOTE        quello che aggiungi TU mentre la conferenza va avanti: la
+#                  gaffe di ieri, la coda al catering, il proiettore rotto, la
+#                  battuta che gira. Una riga per cosa, in fondo.
+#   ## PAROLE      parole che dice solo chi è davvero qui. Servono a giudicare
+#                  gli ALTRI, non a scrivere: un ospite che in tutta la stanza
+#                  non ne tocca nemmeno una, qui probabilmente non c'è.
 #   ## PROGRAMMA   righe "AAAA-MM-GG HH:MM-HH:MM | cosa succede"
 #   ## FUORI       cosa fa la gente quando non c'è programma, per fascia oraria:
-#                  "HH:MM-HH:MM | ..."
+#                  righe "HH:MM-HH:MM | ..."
 #
 # Il processore prende SEMPRE + NOTE + la riga di PROGRAMMA (o di FUORI) che
 # corrisponde all'ora in cui sta parlando. Le righe che iniziano con "#" non
@@ -27,6 +30,17 @@ Molti alloggiano dalle parti del Teatro Massimo o del Politeama.
 
 ## NOTE
 # (vuoto per ora: aggiungi qui, una riga per cosa, mentre la conferenza va avanti)
+
+## PAROLE
+# Parole che dice solo chi è davvero qui. Servono a giudicare gli ALTRI, non a
+# scrivere: un ospite che in tutta la stanza non ne tocca nemmeno una, molto
+# probabilmente qui non c'è. Aggiungine quando ne nascono di nuove.
+palermo ballarò politeama massimo cattedrale normanni ingegneria cassaro
+quattrocanti vucciria capo mondello sferracavallo
+arancina arancine panelle sfincione cannolo cassata granita
+boleda cotterell ailc clic-it unipa aula magna poster keynote tutorial
+palermobilità amat punta-raisi falcone-borsellino
+counterspeech surprisal parsing morfologia
 
 ## PROGRAMMA
 2026-09-14 08:30-09:00 | Registrazione all'Aula Magna di Ingegneria, coda al banchetto dei badge.

@@ -23,7 +23,17 @@ import os
 import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+COMMON_FILE = os.path.join(HERE, "wordlists", "common_it.txt")
 CONTEXT_FILE = os.path.join(HERE, "context_it.txt")
+
+
+def _common_words() -> frozenset:
+    """Ordinary Italian, from the wordlist the world ships for the same purpose."""
+    if not os.path.exists(COMMON_FILE):
+        return frozenset()
+    with open(COMMON_FILE, encoding="utf-8") as handle:
+        return frozenset(ln.strip().lower() for ln in handle
+                         if ln.strip() and not ln.startswith("#"))
 
 
 def _minutes(clock: str) -> int:
@@ -44,6 +54,7 @@ class Context:
         self._stamp = None
         self.always: list[str] = []
         self.notes: list[str] = []
+        self.words: list[str] = []          # explicit insider markers
         self.programme: list[tuple] = []    # (date, start, end, text)
         self.off_hours: list[tuple] = []    # (start, end, text)
         self.reload()
@@ -59,6 +70,7 @@ class Context:
         self._stamp = stamp
 
         self.always, self.notes, self.programme, self.off_hours = [], [], [], []
+        self.words = []
         section = ""
         with open(self.path, encoding="utf-8") as handle:
             for line in handle:
@@ -77,6 +89,8 @@ class Context:
                     self.always.append(line)
                 elif section == "NOTE":
                     self.notes.append(line)
+                elif section == "PAROLE":
+                    self.words += [w.lower() for w in line.split()]
                 elif section == "PROGRAMMA" and "|" in line:
                     when, _, what = line.partition("|")
                     parts = when.split()
@@ -114,6 +128,36 @@ class Context:
         when = when or datetime.datetime.now()
         days = {date for date, _, _, _ in self.programme}
         return when.strftime("%Y-%m-%d") in days
+
+    def markers(self) -> frozenset:
+        """Words that only somebody who is actually here would drop into chat.
+
+        Taken from the context file rather than a list of their own, so they
+        stay in step with it: the proper nouns (Palermo, Ballarò, Boleda,
+        Politeama, AMAT) plus the handful of lowercase words that are specific
+        to this place and week. A guest who says "arancina" or "Quattro Canti"
+        has either been here or been told about here; a guest who never touches
+        any of it across a whole room has neither.
+        """
+        self.reload()
+        if self.words:
+            return frozenset(self.words)
+
+        # No explicit list: fall back to the proper nouns in the prose
+        text = " ".join(self.always + self.notes
+                        + [what for _, _, _, what in self.programme]
+                        + [what for _, _, what in self.off_hours])
+
+        found = {w.strip(".,;:!?()'\"").lower()
+                 for w in text.split() if len(w) > 4 and w[:1].isupper()}
+
+        # A capital at the start of a line is not a proper noun. Subtracting the
+        # world's own common-Italian list drops "Prima", "Pausa", "Molti" and
+        # leaves the names that actually mean something
+        found -= _common_words()
+        found |= {"arancina", "arancine", "panelle", "sfincione", "cornetto",
+                  "poster", "talk", "sessione", "keynote", "badge", "coffee"}
+        return frozenset(w for w in found if len(w) > 3)
 
     def block(self, when: datetime.datetime | None = None) -> str:
         """The whole context for one turn, ready to drop into the prompt."""

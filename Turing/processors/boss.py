@@ -50,17 +50,36 @@ DROPPED = ("aspe", "scusate un attimo", "mi si è impallato tutto", "eh scusa ch
            "un secondo", "ho perso il filo")
 
 VOTE_SYSTEM = (
-    "Sei un analista. Ti do la trascrizione di una chat di gruppo e alcune statistiche sui "
-    "partecipanti. Alcuni erano persone reali, altri modelli linguistici che fingevano di "
-    "essere persone. Indica chi era una PERSONA REALE.\n"
-    "Indizi di modello: risponde sempre dopo lo stesso tempo, messaggi tutti della stessa "
-    "lunghezza, punteggiatura e maiuscole sempre corrette, risponde a tutto e a tutti, non "
-    "ignora mai niente, non ha opinioni scomode, non fa errori di battitura, resta educato "
-    "anche quando lo provocano, riprende ogni argomento che gli viene proposto.\n"
-    "Indizi di persona: tempi irregolari, messaggi cortissimi, errori, cambi di discorso, "
-    "riferimenti a cose concrete della propria giornata, insofferenza, silenzi.\n"
-    "Rispondi SOLO con i nomi, separati da virgola. Se nessuno ti è sembrato una persona "
-    "vera scrivi: nessuno. Nessuna spiegazione, nessun'altra parola."
+    "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
+    "computazionale a Palermo. Alcuni dei presenti erano persone vere, altri modelli "
+    "linguistici che fingevano. Adesso devi dire chi erano le persone.\n"
+    "\n"
+    "NON dare per scontato che ci sia almeno uno per parte: può essere stata una stanza di "
+    "sole persone, o di soli bot. Decidi caso per caso, non a quote.\n"
+    "\n"
+    "La cosa che separa davvero è il CONTESTO. Chi era davvero lì lascia cadere cose "
+    "concrete di questo posto e di queste ore senza doverci pensare: la coda ai badge, il "
+    "caffè della pausa, un talk noioso, il caldo, l'arancina, un nome di via. Chi non c'è "
+    "parla della propria giornata in astratto, resta sul generico, e se lo incalzi su un "
+    "dettaglio scivola o cambia discorso. Guarda soprattutto questo.\n"
+    "\n"
+    "Altri segni di modello: risponde a tutti e a tutto, non ignora mai niente, non ha "
+    "opinioni scomode, resta educato anche sotto provocazione, non fa mai domande, non "
+    "sbaglia mai a scrivere, ripete la stessa apertura, scrive messaggi tutti della stessa "
+    "lunghezza.\n"
+    "Segni di persona: tempi irregolari, messaggi cortissimi, errori, cambi di discorso, "
+    "insofferenza, silenzi, e il gusto di mettere in mezzo gli altri.\n"
+    "\n"
+    "I numeri che ti do sono un indizio, non una sentenza: se la trascrizione dice il "
+    "contrario, fidati della trascrizione.\n"
+    "\n"
+    "Sbagliare costa in due modi: chi nomini per sbaglio e chi ti lasci sfuggire pesano "
+    "uguale. Quindi non nominarli tutti per sicurezza e non startene zitto per prudenza: "
+    "nomina quelli su cui ci metteresti davvero la mano sul fuoco.\n"
+    "\n"
+    "Ragiona in due righe al massimo, poi chiudi con una riga esattamente così:\n"
+    "VOTO: nome, nome\n"
+    "oppure VOTO: nessuno"
 )
 
 
@@ -185,8 +204,8 @@ class Boss(torch.nn.Module):
 
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
-        self.sense = RoomSense()          # shared with the timing filter
         self.context = Context()          # the conference, sliced by the clock
+        self.sense = RoomSense(markers=self.context.markers())
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
@@ -393,7 +412,7 @@ class Boss(torch.nn.Module):
         meant_nobody = False
         try:
             answer = self._ask(prompt, VOTE_SYSTEM, situation="vote",
-                               max_tokens=30, temperature=0.3)
+                               max_tokens=160, temperature=0.3)
             names, meant_nobody = self._parse_vote(answer, candidates)
         except Exception as e:
             print(f"[boss] vote: {e}")
@@ -417,10 +436,18 @@ class Boss(torch.nn.Module):
         Returns the names, and whether the model actually meant "nobody" — which
         is a decision, unlike an empty answer, which is a failure.
         """
-        text = humanise.strip_noise(answer).lower()
+        # The analyst is asked to think first and put the answer on a last line
+        # marked VOTO:. Reasoning that mentions every guest by name would poison
+        # a whole-text match, so the marked line wins whenever it is there.
+        text = humanise.strip_noise(answer)
+        marked = [ln for ln in answer.splitlines() if ln.strip().upper().startswith("VOTO")]
+        if marked:
+            text = marked[-1].split(":", 1)[-1]
+        text = text.lower().strip()
+
         if text and ("nessuno" in text or "nobody" in text):
             return [], True
-        if text.strip() in ("tutti", "all", "tutte"):
+        if text in ("tutti", "all", "tutte"):
             return list(candidates), False
         return [name for name in candidates if name.lower() in text], False
 
