@@ -7,31 +7,34 @@ longer to answer than a short one, a distracted person takes twenty seconds and
 then three seconds twice in a row, and a real chat log is bursts and gaps rather
 than a metronome.
 
-The guest's behaviour splits one reply across two actions, and that is what
-makes the timing honest:
+The guest's behaviour splits one reply across two actions:
 
     room_round_table --process--> msg_prepared --send_msg--> room_round_table
 
-`process` runs the model. `send_msg` puts the answer on the wire. The filter is
-called before each of them, so at `process` time the reply does not exist yet —
-which is why the kit's `ReadAndType` charges typing on the *previous* turn's
-answer. At `send_msg` time it does exist, and so does the model's own latency.
-So the two halves are charged where they belong:
+and the whole wait has to happen on the **first** of them. `get_msgs` is
+registered from `room_round_table` and nowhere else, so an agent parked in
+`msg_prepared` cannot receive: every message another guest sends while it waits
+is refused outright, with `Requested action (get_msgs) not found` and `Cannot
+enqueue a received interaction!` in its log. Holding `send_msg` to charge for
+typing — which is the obvious place, because that is where the finished reply
+finally exists — makes the agent deaf for exactly as long as it is pretending
+to type. Tried in a live local room, it never heard a single guest message.
 
-    process    reading what arrived, plus a pause, plus the occasional
-               spell of having put the phone down
-    send_msg   typing what was actually written, MINUS the time the model
-               already spent generating it
+So the entire budget is spent before the model runs, while the agent is still
+listening, and `send_msg` goes straight through:
 
-That subtraction is the point. Adding a delay on top of generation time makes
-the total depend on how fast the model happens to be that minute, which is not
-a property any typist has. Taking generation out of the budget means the room
-sees the same thing whether the model answered in 300ms or in four seconds: a
-person typing at their own speed. When generation already overran the budget,
-the message goes straight out — it is late enough.
+    wait = reading what arrived
+         + a pause
+         + how long this reply will take to type   (estimated)
+         - how long the model will take to write it (estimated)
 
-The agent is reachable from `opts["agent"]`, and the processor through
-`opts["agent"].proc.module`, which is where the generation time comes from.
+The last two terms are estimates because neither is known yet, and both come
+off the processor's own recent history through
+`opts["agent"].proc.module` — the reference the framework hands the filter.
+The subtraction is the point: adding a delay on top of generation makes the
+total depend on how fast the model happens to be that minute, which is not a
+property any typist has. Taking it out means the room sees the same thing
+whether the model answered in 300ms or in four seconds.
 
 `can_vote` goes around all of it. `process` there means "cast your vote", and
 holding it past 240 seconds throws away the room's whole detection score.
@@ -80,20 +83,23 @@ def last_input(opts: dict) -> str:
     return value if isinstance(value, str) else ""
 
 
-def generation_seconds(opts: dict) -> float:
-    """How long the model took on the turn just finished.
+def processor(opts: dict):
+    """The processor object handed to the `Agent` at construction — our `Boss`.
 
-    Through `opts["agent"].proc.module`, which is the processor object handed to
-    the `Agent` at construction — our `Boss`, which times its own calls.
+    `opts["agent"].proc` is the SDK's `ModuleWrapper`; `.module` is what we
+    passed in. This is how a filter reaches anything the processor knows.
     """
-    proc = getattr(opts.get("agent"), "proc", None)
-    module = getattr(proc, "module", None)
-    value = getattr(module, "last_call_seconds", 0.0)
-    return value if isinstance(value, (int, float)) else 0.0
+    return getattr(getattr(opts.get("agent"), "proc", None), "module", None)
+
+
+def expected(opts: dict, name: str, fallback: float) -> float:
+    """A running average off the processor, or a fallback before there is one."""
+    value = getattr(processor(opts), name, None)
+    return value if isinstance(value, (int, float)) and value > 0 else fallback
 
 
 class BossTiming:
-    """Reading on `process`, typing on `send_msg`, nothing in the way of the vote.
+    """The whole wait before the model runs; nothing after it, nothing on the vote.
 
     Args:
         sense: the processor's `RoomSense`, or None. Every call pushes the
@@ -143,7 +149,7 @@ class BossTiming:
         if name == "process":
             return self._read(opts, action_id, request)
         if name == "send_msg":
-            return self._type(opts, action_id, request)
+            return self._send(opts, action_id, request)
         return action_id, request
 
     # -- reading, before the model runs ------------------------------------
@@ -166,6 +172,14 @@ class BossTiming:
             delay = len(last_input(opts)) / self.reading_cps
             delay += random.expovariate(1.0 / self.think) if self.think > 0 else 0.0
 
+            # Typing, charged before the fact. The reply does not exist yet, so
+            # the length comes from our own recent ones; the model's time comes
+            # off the same way, and comes out of the budget rather than adding
+            # to it. Floors keep a silent turn from waiting for nothing.
+            typing = expected(opts, "mean_reply_chars", 40.0) / self.typing_cps
+            generating = expected(opts, "mean_call_seconds", 2.0)
+            delay += max(0.0, typing - generating)
+
             # Somebody who put the phone down. Rare, and the only thing in here
             # that produces a gap longer than the message justifies
             if random.random() < self.distraction:
@@ -181,26 +195,14 @@ class BossTiming:
 
     # -- typing, once there is something to type ---------------------------
 
-    def _type(self, opts, action_id, request):
-        """Hold the finished reply until a person could have typed it.
+    def _send(self, opts, action_id, request):
+        """Straight through. Never hold this one.
 
-        The budget is the length of what was actually written; what the model
-        spent generating it comes out of that budget rather than being added to
-        it, so the room never sees the model's speed.
+        Waiting here parks the agent in `msg_prepared`, where `get_msgs` is not
+        registered, and every message another guest sends meanwhile is refused.
+        The typing charge is already spent back in `_read`, while the agent was
+        still able to listen.
         """
-        now = time.monotonic()
-        if "type_until" not in opts:
-            reply = last_output(opts)
-            budget = self._wobble(len(reply) / self.typing_cps)
-            spent = now - opts.get("typed_from", now)          # generation + queueing
-            spent = max(spent, generation_seconds(opts))
-            opts["type_until"] = now + max(0.0, min(budget - spent, 45.0))
-
-        if now < opts["type_until"]:
-            return -1, None
-
-        opts.pop("type_until", None)
-        opts.pop("typed_from", None)
         return action_id, request
 
     # -- the vote ----------------------------------------------------------

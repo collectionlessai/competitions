@@ -191,6 +191,12 @@ class Boss(torch.nn.Module):
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
 
+        # Running averages the timing filter reads back through
+        # `opts["agent"].proc.module`. It has to budget for typing before the
+        # reply exists, so it budgets from what we have been writing lately.
+        self.mean_reply_chars = 0.0
+        self.mean_call_seconds = 0.0
+
     # -- backend ----------------------------------------------------------
 
     def _backend(self):
@@ -281,6 +287,14 @@ class Boss(torch.nn.Module):
             parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
         parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
         return "\n\n".join(parts)
+
+    def _note_pace(self, chars: int) -> None:
+        """Blend this turn into the averages the timing filter budgets from."""
+        weight = 0.4
+        self.mean_reply_chars = (1 - weight) * (self.mean_reply_chars or chars) + weight * chars
+        if self.last_call_seconds > 0:
+            self.mean_call_seconds = ((1 - weight) * (self.mean_call_seconds or self.last_call_seconds)
+                                      + weight * self.last_call_seconds)
 
     def _note_opener(self, reply: str) -> None:
         """Remember how this line started, so the next few do not start the same."""
@@ -444,6 +458,7 @@ class Boss(torch.nn.Module):
 
         self.conv.remember(reply)
         self._note_opener(reply)
+        self._note_pace(len(reply))
         self.sense.i_spoke()
         self.director.spoke()
         self.last_spoke_at = self.sense.elapsed
