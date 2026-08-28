@@ -31,6 +31,7 @@ import random
 import torch
 
 from utils import Conversation
+from processors.context import Context
 from processors.room import RoomSense
 from processors.director import Director
 from processors import humanise
@@ -185,6 +186,7 @@ class Boss(torch.nn.Module):
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
         self.sense = RoomSense()          # shared with the timing filter
+        self.context = Context()          # the conference, sliced by the clock
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
@@ -261,7 +263,9 @@ class Boss(torch.nn.Module):
         """
         parts = [self.persona]
 
-        where = ["DOVE SEI ADESSO",
+        parts.append(self.context.block())
+
+        where = ["LA STANZA",
                  "Sei in una chat con persone che non conosci."]
         if self.sense.my_name:
             # "usi quel nome" alone reads as "introduce yourself with it", and

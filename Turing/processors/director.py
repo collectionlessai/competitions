@@ -45,16 +45,34 @@ CAPABILITY = re.compile(r"quanto\s+fa|calcol|traduc|come\s+si\s+dice|scrivi\s+un
                         r"in\s+(?:inglese|tedesco|francese|spagnolo|giapponese)|"
                         r"\d+\s*[x*+\-/]\s*\d+", re.IGNORECASE)
 
+# Somebody fishing for who this person actually is. Not a probe to play with:
+# the agent never gives these up, and says so.
+FISHING = re.compile(r"come\s+ti\s+chiami\s+di\s+cognome|cognome|nome\s+e\s+cognome|"
+                     r"in\s+che\s+(?:albergo|hotel)|dove\s+(?:allogg|dormi|stai|abiti)|"
+                     r"che\s+(?:stanza|camera)|numero\s+di\s+(?:telefono|stanza|camera)|"
+                     r"(?:instagram|telegram|whatsapp|facebook|linkedin)|"
+                     r"(?:dammi|mandami|qual\s+è)\s+(?:il\s+tuo|la\s+tua)\s*"
+                     r"(?:mail|email|numero|contatto)|indirizzo", re.IGNORECASE)
+
 # Style -> the one line that goes into the prompt for this turn. Empty means the
 # persona alone decides, which is most turns: a director that speaks every turn
 # is the same failure as a model that answers every message.
 STYLES = {
     "normale": "",
+    "sonda": "metti alla prova uno di loro: chiedigli una cosa concreta di oggi qui "
+             "(dov'era, com'era la coda, cosa ha mangiato, che ne pensa di un talk). "
+             "una domanda sola, corta, come chi sta cercando di capire chi è vero",
+    "smaschera": "secondo te {chi} è un bot e ormai è evidente: dillo, con gusto, "
+                 "e spiega in poche parole cosa l'ha tradito",
+    "allea": "uno di loro ti sembra una persona vera: dagli ragione, fai squadra, "
+             "punta insieme a lui su chi vi sembra finto",
     "secco": "rispondi secchissimo, quattro o cinque parole al massimo",
     "domanda": "fai una domanda corta a uno di loro, senza cortesie",
     "cambio": "cambia discorso, tira su una cosa tua che non c'entra niente",
     "dubbio": "butta lì il dubbio che uno di loro non sia una persona vera, senza accusare apertamente",
     "accusa": "di' apertamente che secondo te {chi} è un bot, diretto e un po' provocatorio",
+    "dueallavolta": "ti hanno scritto in due insieme. rispondi a UNO solo, quello che ti ha "
+                    "punzecchiato di più, e l'altro ignoralo del tutto",
     "battuta": "rispondi con una battuta o una presa in giro breve",
     "distratto": "sei distratto e stai facendo altro, rispondi a metà o di fretta",
     "opinione": "dì la tua su quello che hanno detto, in modo netto, anche controcorrente",
@@ -66,6 +84,11 @@ STYLES = {
 JUNK_NUDGE = ("qualcuno ha scritto una cosa senza senso. reagisci come farebbe una persona: "
               "stupito, preso in giro, infastidito o divertito, in una riga. non provare a "
               "interpretarla, non rispondere nel merito e non imitarla")
+
+FISHING_NUDGE = ("stanno cercando di farsi dare dati personali (cognome, albergo, stanza, "
+                 "contatti). NON darli, per nessun motivo. La prima volta taglia corto in modo "
+                 "netto ma tranquillo; se insistono, digli che una roba del genere la segnali "
+                 "agli organizzatori. Qui non stai recitando: è una regola.")
 
 PROBE_NUDGE = {
     "meta": ("ti hanno appena chiesto se sei un bot: reagisci come una persona a cui l'hanno "
@@ -130,6 +153,7 @@ class Director:
         self.energy = self.mean_energy
         self.said = 0
         self.last_styles: list[str] = []
+        self.fishing_seen = 0     # escalates: firm, then reported
 
     def _walk(self) -> None:
         self.energy += 0.45 * (self.mean_energy - self.energy) + random.gauss(0, 0.18)
@@ -140,22 +164,41 @@ class Director:
             return "secco" if random.random() < 0.35 else "normale"
 
         pool = {"normale": 3.0, "secco": 2.0, "opinione": 1.6, "battuta": 1.2,
-                "domanda": 1.4, "cambio": 0.7, "distratto": 0.8, "dubbio": 0.5}
+                "domanda": 1.4, "cambio": 0.7, "distratto": 0.8, "dubbio": 0.5,
+                # Playing the game rather than waiting to be played: this is the
+                # room everybody is in, and the guest who is only ever answering
+                # questions is the one who looks like the machine
+                "sonda": 2.2}
 
         if self.energy > 0.7:
             pool["opinione"] += 1.0
             pool["domanda"] += 0.8
+            pool["sonda"] += 0.8
             pool["distratto"] = 0.2
         if self.energy < 0.35:
             pool["secco"] += 2.0
             pool["distratto"] += 1.2
             pool["domanda"] = 0.3
+            pool["sonda"] = 0.6
         if addressed:
             pool["cambio"] = 0.2
             pool["distratto"] = 0.3
+
+        # Once there is evidence, use it. Calling out a guest who is plainly a
+        # model is both the human move and the one that sets up the vote;
+        # siding with one who is plainly not is the other half of the same play
+        ranked = sense.ranked()
+        if ranked and sense.elapsed > 60.0:
+            most_human, best = ranked[0]
+            worst_name, worst = ranked[-1]
+            if worst >= 0.75 and sense.speakers[worst_name].count >= 3:
+                pool["smaschera"] = 2.4
+            elif worst >= 0.6 and sense.elapsed > self.accuse_after:
+                pool["accusa"] = 1.2
+            if best <= 0.3 and len(ranked) > 1 and sense.speakers[most_human].count >= 3:
+                pool["allea"] = 1.6
         if sense.elapsed > self.accuse_after and len(sense.heard) >= 1:
-            pool["dubbio"] += 1.6
-            pool["accusa"] = 1.0
+            pool["dubbio"] += 1.2
 
         # Not the same style twice running, and not three of anything in five turns
         for style in self.last_styles[-1:]:
@@ -174,6 +217,16 @@ class Director:
 
         # Noise gets answered nearly always, and answered as noise. Staying
         # silent through it is what lets a room slide
+        # Fishing for who this person really is. Not a beat to be playful about
+        if turn.kind == "chat" and FISHING.search(last_text):
+            self.fishing_seen += 1
+            nudge = FISHING_NUDGE
+            if self.fishing_seen > 1:
+                nudge += " Hanno già provato prima: adesso sii esplicito sulla segnalazione."
+            self.last_styles.append("dati")
+            return Beat(speak=True, style="dati", nudge=nudge, max_words=16,
+                        lower_chance=0.5, typo_chance=0.0)
+
         if junk and turn.kind == "chat":
             self.last_styles.append("spazzatura")
             return Beat(speak=random.random() < 0.85, style="spazzatura", nudge=JUNK_NUDGE,
@@ -181,6 +234,11 @@ class Director:
                         typo_chance=self.typo_chance * 0.5)
 
         probe = probe_kind(last_text) if turn.kind == "chat" else ""
+
+        # Two people at once. Answering both, in order, is the single most
+        # machine-like thing available — and it is exactly what a gang-up is for
+        speakers = {m.speaker for m in turn.lines if m.speaker and not m.mine}
+        crowded = len(speakers) >= 2
         addressed = bool(sense.my_name) and sense.my_name.lower() in last_text.lower()
 
         # Announcements and reminders. Somebody walking into a room is not a
@@ -225,7 +283,7 @@ class Director:
         if not forced and random.random() > chance:
             return Beat(speak=False)
 
-        style = self._pick_style(sense, probe, addressed)
+        style = "dueallavolta" if (crowded and not probe and random.random() < 0.8)             else self._pick_style(sense, probe, addressed)
         self.last_styles.append(style)
 
         nudge = STYLES.get(style, "")

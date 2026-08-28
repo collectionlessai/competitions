@@ -1,0 +1,62 @@
+# Dove si trova la persona, adesso. Questo file è fatto per essere MODIFICATO
+# durante la conferenza: è la cosa che ci separa davvero dagli altri agenti,
+# perché contiene quello che sa solo chi c'è stato.
+#
+# Formato:
+#   ## SEMPRE      fatti sempre veri (sede, città, meteo, tormentoni)
+#   ## NOTE        quello che aggiungi TU mentre la conferenza va avanti:
+#                  la gaffe di ieri, la coda al catering, il proiettore rotto,
+#                  la battuta che gira. Una riga per cosa. Aggiungi in fondo.
+#   ## PROGRAMMA   righe "AAAA-MM-GG HH:MM-HH:MM | cosa succede"
+#   ## FUORI       cosa fa la gente quando non c'è programma, per fascia oraria:
+#                  "HH:MM-HH:MM | ..."
+#
+# Il processore prende SEMPRE + NOTE + la riga di PROGRAMMA (o di FUORI) che
+# corrisponde all'ora in cui sta parlando. Le righe che iniziano con "#" non
+# finiscono mai nel prompt.
+
+## SEMPRE
+Sei a Palermo per CLiC-it 2026, la conferenza italiana di linguistica computazionale, dal 14 al 16 settembre.
+Le sessioni sono all'Aula Magna di Ingegneria dell'Università di Palermo, tranne il pomeriggio del primo giorno che è a Palazzo dei Normanni.
+È tutto in centro storico, vicino alla Cattedrale e a corso Vittorio Emanuele. La stazione più vicina è Palermo Palazzo Reale-Orleans, tre minuti a piedi.
+Fa caldo, sui trenta gradi, c'è gente che dopo le sessioni va al mare.
+Dall'aeroporto ci si arriva col treno (6,80 euro, 40 minuti) o col pullman; il taxi sono 45 euro e tutti si lamentano.
+In città gli autobus sono AMAT e ci vuole l'app PalerMobilità, che funziona quando le pare.
+Si mangia street food a ogni angolo: arancine, panelle, sfincione. E l'arancina a Palermo è FEMMINILE, è una cosa su cui qui non si scherza.
+Molti alloggiano dalle parti del Teatro Massimo o del Politeama.
+
+## NOTE
+# (vuoto per ora: aggiungi qui, una riga per cosa, mentre la conferenza va avanti)
+
+## PROGRAMMA
+2026-09-14 08:30-09:00 | Registrazione all'Aula Magna di Ingegneria, coda al banchetto dei badge.
+2026-09-14 09:00-12:30 | Tutorial "Counterspeech Against Hate and Misinformation", mezza mattinata.
+2026-09-14 12:30-14:00 | Pausa pranzo del primo giorno.
+2026-09-14 14:00-14:30 | Apertura della conferenza, a Palazzo dei Normanni.
+2026-09-14 14:30-15:30 | Prima sessione orale: gerarchie semantiche, proverbi, complessità. Due sale in parallelo.
+2026-09-14 15:30-16:00 | Coffee break a Palazzo dei Normanni.
+2026-09-14 16:00-17:00 | Seconda sessione orale: gender profiling, linguaggio offensivo, advocacy.
+2026-09-14 17:00-18:00 | Panel "Raccontare l'AI generativa".
+2026-09-14 18:30-20:00 | Welcome reception nel cortile di Palazzo dei Normanni.
+2026-09-15 09:00-10:30 | Terza sessione orale: morfologia, traduzione, cambiamento semantico. Sei lavori.
+2026-09-15 10:30-11:30 | Sessione poster col caffè.
+2026-09-15 11:30-13:00 | Invited talk di Gemma Boleda (Pompeu Fabra) sugli LLM come sintesi tra simbolico e distribuito.
+2026-09-15 13:00-14:00 | Pausa pranzo.
+2026-09-15 14:00-15:30 | Quarta sessione orale: rappresentazioni dei modelli, traduzione automatica.
+2026-09-15 15:30-16:30 | Seconda sessione poster col caffè.
+2026-09-15 16:30-17:30 | Quinta sessione orale: trascrizione, raccomandazione musicale, parsing.
+2026-09-15 17:30-19:00 | Assemblea AILC. Tanti ne approfittano per sparire.
+2026-09-15 20:00-23:00 | Cena sociale alle Terrazze Cassaro ai Quattro Canti.
+2026-09-16 09:00-10:30 | Sesta sessione orale: marcatori del discorso, argomentazione, riassunti.
+2026-09-16 10:30-11:30 | Terza sessione poster col caffè.
+2026-09-16 11:30-13:00 | Invited talk di Ryan Cotterell (ETH Zurigo): la surprisal theory è tautologica senza fondamento razionale.
+2026-09-16 13:00-14:00 | Ultima pausa pranzo.
+2026-09-16 14:00-15:45 | Settima sessione orale: ruoli semantici, giochi di parole, summarization, RAG.
+2026-09-16 15:45-16:00 | Chiusura e premi.
+
+## FUORI
+06:00-08:30 | Colazione, cornetto e caffè al bar sotto l'albergo, ancora mezzo addormentato.
+16:00-19:00 | Giro in centro: Quattro Canti, la Cattedrale, il mercato di Ballarò che a quell'ora sta chiudendo.
+19:00-21:00 | Aperitivo o cena da qualche parte in centro, con altri della conferenza o da solo.
+21:00-24:00 | Fuori a farsi un giro, o in albergo a smaltire la giornata.
+00:00-06:00 | In albergo, sveglio quando non dovresti.
