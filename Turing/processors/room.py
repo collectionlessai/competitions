@@ -60,6 +60,25 @@ VOTING = "can_vote"
 CHATTING = "room_round_table"
 VOTED = "vote_provided"
 
+FOLD = str.maketrans("àáâäèéêëìíîïòóôöùúûüç", "aaaaeeeeiiiioooouuuuc")
+
+
+def _fold(text: str) -> str:
+    """Lowercase and strip accents. Nobody types Ballarò with the accent."""
+    return text.lower().translate(FOLD)
+
+
+def _said(haystack: str, word: str) -> bool:
+    """Whole-word, accent-blind match.
+
+    Substrings turn "magnamo" into "magna" and "capoluogo" into "capo", which is
+    credit for nothing; accents turn "ballaro" into a miss, which is the same
+    mistake the other way round.
+    """
+    return re.search(r"(?<![a-z])" + re.escape(_fold(word)) + r"(?![a-z])",
+                     _fold(haystack)) is not None
+
+
 EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
 
 
@@ -106,7 +125,7 @@ class Speaker:
             "question": self._rate(lambda m: "?" in m),
         }
 
-    def bot_score(self, share: float | None = None, markers=()) -> float:
+    def bot_score(self, share: float | None = None, markers=(), strong=()) -> float:
         """0 reads as a person, 1 reads as a model. A prior, not a verdict.
 
         Every term is something a model does because nothing stops it: it types
@@ -117,7 +136,9 @@ class Speaker:
         Args:
             share: this speaker's fraction of everything said in the room, or
                 None to skip that term.
-            markers: words only somebody actually at the conference would use.
+            markers: words specific to this place and week.
+            strong: words from things that happened here and were never
+                published, which is the only tier a competitor cannot scrape.
         """
         f = self.features()
         if f["count"] < 2:
@@ -135,17 +156,33 @@ class Speaker:
             score += 1.0 * min(1.0, max(0.0, (share - 0.3) / 0.35))
             weight += 1.0
 
-        # Nothing that places them here. This is the heaviest term because it is
-        # the one the opposition cannot fake from a persona file: the organisers'
-        # seeded guests are given a character, not a conference, so they talk
-        # about their day in the abstract and never about Ballarò, the badge
-        # queue or Cotterell. A whole room without one concrete local word is a
-        # guest who is not in Palermo.
-        if markers and f["count"] >= 3:
+        # Nothing that places them here. The heaviest term, because it is the
+        # only one that asks for something a persona file cannot supply — but
+        # it has to be earned rather than triggered:
+        #
+        #   * distinct words count, repeats do not, so saying "Palermo" a
+        #     hundred times is worth exactly one word — and the broad words are
+        #     not on the list at all, because everybody has them;
+        #   * a word from `## NOTE` counts double, since that tier is the one a
+        #     competitor scraping the conference website cannot reach;
+        #   * credit saturates, so nobody has to recite a gazetteer.
+        if (markers or strong) and f["count"] >= 3:
             said = " ".join(self.msgs).lower()
-            hits = sum(1 for word in markers if word in said)
-            score += 1.8 * (0.0 if hits else 1.0)
+            seen = {w for w in markers if _said(said, w)}
+            deep = {w for w in strong if _said(said, w)}
+            credit = min(1.0, (len(seen) + 2 * len(deep)) / 3.0)
+            score += 1.8 * (1.0 - credit)
             weight += 1.8
+
+        # Saying the same handful of words over and over. Catches the guest who
+        # spams a local word to buy the term above, and the degenerate loop in
+        # general: people repeat themselves, but not like this
+        if f["count"] >= 3:
+            tokens = " ".join(self.msgs).lower().split()
+            if len(tokens) >= 12:
+                variety = len(set(tokens)) / len(tokens)
+                score += 0.8 * max(0.0, 1.0 - variety / 0.45)
+                weight += 0.8
 
         # Never asks anything. The room is a guessing game and everybody in it is
         # probing everybody else; a guest who only ever answers is not playing
@@ -213,9 +250,10 @@ class RoomSense:
     framework hands a reference to the state machine.
     """
 
-    def __init__(self, manager_guess: str = "MANAGER", markers=()):
+    def __init__(self, manager_guess: str = "MANAGER", markers=(), strong=()):
         self.manager_guess = manager_guess
         self.markers = frozenset(markers)
+        self.strong = frozenset(strong)
         self.state = ""             # last state name the policy filter saw
         self.reset()
 
@@ -407,7 +445,7 @@ class RoomSense:
     def local_hits(self, name: str) -> list:
         """The insider words this guest actually used."""
         said = " ".join(self.speakers[name].msgs).lower()
-        return sorted(word for word in self.markers if word in said)
+        return sorted({w for w in self.markers | self.strong if _said(said, w)})
 
     def evidence(self) -> str:
         """Per-speaker numbers for the analyst, with the local words spelled out.
@@ -439,8 +477,8 @@ class RoomSense:
     def ranked(self) -> list[tuple[str, float]]:
         """Everyone we heard, most human-looking first."""
         shares = self.shares()
-        markers = self.markers
-        return sorted(((n, self.speakers[n].bot_score(shares.get(n), markers))
+        return sorted(((n, self.speakers[n].bot_score(shares.get(n),
+                                                     self.markers, self.strong))
                        for n in self.heard),
                       key=lambda pair: pair[1])
 

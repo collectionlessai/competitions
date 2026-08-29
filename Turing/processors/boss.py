@@ -205,7 +205,8 @@ class Boss(torch.nn.Module):
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
         self.context = Context()          # the conference, sliced by the clock
-        self.sense = RoomSense(markers=self.context.markers())
+        self.sense = RoomSense(markers=self.context.markers(),
+                               strong=self.context.note_markers())
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)

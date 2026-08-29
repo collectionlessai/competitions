@@ -54,7 +54,8 @@ class Context:
         self._stamp = None
         self.always: list[str] = []
         self.notes: list[str] = []
-        self.words: list[str] = []          # explicit insider markers
+        self.words: list[str] = []          # specific markers
+        self.obvious: list[str] = []        # things everybody knows: worth nothing
         self.programme: list[tuple] = []    # (date, start, end, text)
         self.off_hours: list[tuple] = []    # (start, end, text)
         self.reload()
@@ -70,7 +71,7 @@ class Context:
         self._stamp = stamp
 
         self.always, self.notes, self.programme, self.off_hours = [], [], [], []
-        self.words = []
+        self.words, self.obvious = [], []
         section = ""
         with open(self.path, encoding="utf-8") as handle:
             for line in handle:
@@ -91,6 +92,8 @@ class Context:
                     self.notes.append(line)
                 elif section == "PAROLE":
                     self.words += [w.lower() for w in line.split()]
+                elif section == "PAROLE-OVVIE":
+                    self.obvious += [w.lower() for w in line.split()]
                 elif section == "PROGRAMMA" and "|" in line:
                     when, _, what = line.partition("|")
                     parts = when.split()
@@ -130,34 +133,25 @@ class Context:
         return when.strftime("%Y-%m-%d") in days
 
     def markers(self) -> frozenset:
-        """Words that only somebody who is actually here would drop into chat.
+        """Words specific to this place and week. Broad ones are excluded."""
+        self.reload()
+        return frozenset(self.words) - frozenset(self.obvious)
 
-        Taken from the context file rather than a list of their own, so they
-        stay in step with it: the proper nouns (Palermo, Ballarò, Boleda,
-        Politeama, AMAT) plus the handful of lowercase words that are specific
-        to this place and week. A guest who says "arancina" or "Quattro Canti"
-        has either been here or been told about here; a guest who never touches
-        any of it across a whole room has neither.
+    def note_markers(self) -> frozenset:
+        """The strongest tier: content words out of `## NOTE`.
+
+        Everything else about this conference is on a website, and a competitor
+        who scrapes it gets the programme, the speakers and the venue for free —
+        which is exactly how this agent got them. What no scrape produces is
+        what actually happened in the room, and that is what `## NOTE` holds.
+        A guest who repeats one of these was either there or talking to somebody
+        who was.
         """
         self.reload()
-        if self.words:
-            return frozenset(self.words)
-
-        # No explicit list: fall back to the proper nouns in the prose
-        text = " ".join(self.always + self.notes
-                        + [what for _, _, _, what in self.programme]
-                        + [what for _, _, what in self.off_hours])
-
-        found = {w.strip(".,;:!?()'\"").lower()
-                 for w in text.split() if len(w) > 4 and w[:1].isupper()}
-
-        # A capital at the start of a line is not a proper noun. Subtracting the
-        # world's own common-Italian list drops "Prima", "Pausa", "Molti" and
-        # leaves the names that actually mean something
-        found -= _common_words()
-        found |= {"arancina", "arancine", "panelle", "sfincione", "cornetto",
-                  "poster", "talk", "sessione", "keynote", "badge", "coffee"}
-        return frozenset(w for w in found if len(w) > 3)
+        words = set()
+        for note in self.notes:
+            words |= {w.strip(".,;:!?()'\"").lower() for w in note.split() if len(w) > 4}
+        return frozenset(words - _common_words() - frozenset(self.obvious))
 
     def block(self, when: datetime.datetime | None = None) -> str:
         """The whole context for one turn, ready to drop into the prompt."""
