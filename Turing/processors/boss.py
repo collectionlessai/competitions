@@ -233,6 +233,22 @@ class Boss(torch.nn.Module):
                                               temperature=self.temperature, **self.sampler)
         return self.backend
 
+    def warm(self) -> bool:
+        """Make one throwaway call so the first real turn is not the slow one.
+
+        The first call of a process pays for everything at once: spawning the
+        gateway server, its import of torch, and the model being cold at
+        Featherless. Measured at 34.3s in a live room — a ninth of the whole
+        conversation, spent on the opening line. Doing it before the node joins
+        costs nothing, because nobody is waiting yet.
+        """
+        try:
+            self._ask("ciao", "Rispondi con una parola.", max_tokens=4)
+            return True
+        except Exception as e:
+            print(f"[boss] warm-up failed, carrying on: {e}")
+            return False
+
     def _ask(self, prompt: str, system_prompt: str, situation: str = "", **overrides) -> str:
         """One generation, timed.
 

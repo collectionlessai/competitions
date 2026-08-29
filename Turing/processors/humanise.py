@@ -326,8 +326,12 @@ def has_profanity(text: str) -> bool:
 # What an Italian chat message is made of. Anything else — CJK punctuation, box
 # drawing, stray closing brackets, leftover template scraps — is a small model
 # coming apart, and one `]1 emojis:|` in a room ends the game on the spot
-ALLOWED = re.compile(r"[A-Za-zÀ-ÿ0-9\s.,;:!?'\"()\-–—…«»/%&+=@#°àèéìòù]")
-BROKEN_BITS = re.compile(r"[\[\]{}<>|\\^~`_]|\b(?:Finish|Output|Answer|Note|emojis?)\b",
+ALLOWED = re.compile(r"[A-Za-zÀ-ÿ0-9\s.,;:!?'\"()\-–—…«»/%&+=@#°_*`àèéìòù]")
+# Underscore and backtick are deliberately NOT in here. They are ordinary things
+# for a person to type — "test_2", "3_4" — and counting them as debris made the
+# agent answer a perfectly good message with "(qui ha scritto una cosa senza
+# senso)" and then mock the person who sent it.
+BROKEN_BITS = re.compile(r"[\[\]{}<>|\\^~]|\b(?:Finish|Output|Answer|Note|emojis?)\b",
                          re.IGNORECASE)
 
 

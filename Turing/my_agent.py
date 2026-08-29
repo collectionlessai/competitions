@@ -84,6 +84,11 @@ agent = Agent(proc=proc,
               proc_outputs=["text"],    # your reply goes back out as text
               policy_filter=policy)
 
+# One throwaway call before joining: the first generation of a process pays for
+# the gateway starting up and the model being cold, and 34 seconds of that
+# belongs before the room rather than inside it.
+proc.warm()
+
 node = Node(hosted=agent,
             node_name=NODE_NAME,
             hidden=True,          # only your own account sees this node in the web interface
