@@ -57,6 +57,9 @@ NO_SYSTEM = re.compile(r"system role not supported|system.{0,24}not supported", 
 # to find out. The runtime detection below still covers everything else
 NO_SYSTEM_MODELS = re.compile(r"gemma", re.IGNORECASE)
 BAD_REQUEST = re.compile(r"bad_request|invalid_request|rejected as invalid", re.IGNORECASE)
+# The gateway process is gone rather than the model being unhappy. Worth
+# telling apart: one is retried on a fresh socket, the other must not be
+GATEWAY_GONE = re.compile(r"gateway closed|connection (?:reset|refused|aborted)|broken pipe|not connected|closed the connection|errno 10054|errno 10061", re.IGNORECASE)
 
 
 # The SDK asks for the server with a 15-second patience (`connect_timeout`), and
@@ -167,11 +170,12 @@ class FeatherlessBackend:
         sampler = dict(kwargs.pop("sampler", None) or {})
         sampler.setdefault("stop", STOP if stop is None else stop)
 
-        self.api = FeatherlessAPI(model=model, cost=cost if cost is not None else cost_for(model),
-                                  max_tokens=max_tokens, temperature=temperature,
-                                  top_p=top_p, top_k=top_k,
-                                  repetition_penalty=repetition_penalty,
-                                  sampler=sampler, **kwargs)
+        self._build = dict(model=model, cost=cost if cost is not None else cost_for(model),
+                           max_tokens=max_tokens, temperature=temperature,
+                           top_p=top_p, top_k=top_k,
+                           repetition_penalty=repetition_penalty,
+                           sampler=sampler, **kwargs)
+        self.api = FeatherlessAPI(**self._build)
 
     def __call__(self, prompt: str, system_prompt: str | None = None,
                  max_tokens: int | None = None, temperature: float | None = None,
@@ -216,8 +220,34 @@ class FeatherlessBackend:
             self._fallbacks.append(FeatherlessBackend(model=name, **settings))
         return self._fallbacks
 
+    def reconnect(self) -> None:
+        """Throw the handle away and open a new one.
+
+        The handle owns two TCP sockets to the gateway. If that process dies —
+        and it did, once, in a single afternoon — every later call raises, the
+        boss catches it and answers "aspe", and it keeps doing that forever
+        because nothing rebuilds the connection. Over a three-day conference
+        that is the difference between an agent and a stuck record, and the logs
+        look healthy throughout.
+        """
+        try:
+            self.api.close()
+        except Exception:
+            pass
+        self.api = FeatherlessAPI(**self._build)      # spawns the server again if needed
+
     def _generate(self, prompt: str, system_prompt: str | None,
                   max_tokens: int | None, temperature: float | None) -> str:
+        try:
+            return self._call(prompt, system_prompt, max_tokens, temperature)
+        except Exception as e:
+            if not GATEWAY_GONE.search(str(e)):
+                raise
+            self.reconnect()
+            return self._call(prompt, system_prompt, max_tokens, temperature)
+
+    def _call(self, prompt: str, system_prompt: str | None,
+              max_tokens: int | None, temperature: float | None) -> str:
         net = self.api.module        # the inner Net: the sockets, the system prompt, the sampler
         assert net is not None
 
