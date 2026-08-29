@@ -189,23 +189,35 @@ DANGLING = {
 
 
 def cap_words(text: str, limit: int) -> str:
-    """Cut to `limit` words, at the last punctuation before it when there is one."""
+    """Cut to `limit` words, but only where the cut leaves a whole thought.
+
+    A message that stops mid-clause is far more suspicious than a long one.
+    Seen live, answering a person who had just asked how the day was going:
+
+        "caldo, sì. io ho fatto"
+
+    which is not brevity, it is damage — and it was the half that got cut that
+    carried the content. So the ceiling is a preference, not a guarantee: cut at
+    a sentence end, else at a comma, and if neither exists inside the budget,
+    send the whole thing. `max_tokens` on the backend is the real ceiling.
+    """
     words = text.split()
     if len(words) <= limit:
         return text
 
     cut = " ".join(words[:limit])
-    for mark in (". ", "! ", "? ", ", "):
+    for mark in (". ", "! ", "? "):
         if mark in cut:
-            head = cut.rsplit(mark, 1)[0]
-            if len(head.split()) >= max(3, limit // 2):
-                return head.rstrip(" ,")
+            head = cut.rsplit(mark, 1)[0] + mark.strip()
+            if len(head.split()) >= 3:
+                return head
+    if ", " in cut:
+        head = cut.rsplit(", ", 1)[0]
+        if len(head.split()) >= max(4, limit // 2):
+            return head
 
-    # No clause boundary to cut at: back off any word the sentence cannot end on
-    kept = cut.rstrip(" ,").split()
-    while len(kept) > 2 and kept[-1].strip(".,;:!?").lower() in DANGLING:
-        kept.pop()
-    return " ".join(kept).rstrip(" ,")
+    # Nowhere clean to stop: let it run rather than amputate it
+    return text
 
 
 def chat_case(text: str, lower_chance: float = 0.65, stop_chance: float = 0.2) -> str:

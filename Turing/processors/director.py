@@ -235,11 +235,26 @@ class Director:
 
         probe = probe_kind(last_text) if turn.kind == "chat" else ""
 
-        # Two people at once. Answering both, in order, is the single most
-        # machine-like thing available — and it is exactly what a gang-up is for
-        speakers = {m.speaker for m in turn.lines if m.speaker and not m.mine}
+        # Two GUESTS at once. Answering both, in order, is the single most
+        # machine-like thing available, and it is exactly what a gang-up is for.
+        #
+        # The manager is not one of them. It used to be counted, and since its
+        # reminder arrives batched with whatever a guest just said, a two-person
+        # room read as a gang-up: the agent gave one curt answer and then
+        # deliberately ignored the only other person in the room, three
+        # questions running.
+        manager = sense.manager or sense.manager_guess
+        speakers = {m.speaker for m in turn.lines
+                    if m.speaker and not m.mine and m.speaker != manager}
         crowded = len(speakers) >= 2
-        addressed = bool(sense.my_name) and sense.my_name.lower() in last_text.lower()
+        # What counts as being spoken to. A name is the obvious case and the
+        # rarest: people mostly just ask. A question, or a room where there is
+        # nobody else it could be meant for, is being spoken to just as much —
+        # and staying silent through either is what a machine does.
+        named = bool(sense.my_name) and sense.my_name.lower() in last_text.lower()
+        asked = "?" in last_text
+        alone_with = len(sense.heard) <= 1
+        addressed = named or asked or (alone_with and turn.kind == "chat")
 
         # Announcements and reminders. Somebody walking into a room is not a
         # conversational turn, and the room fires one anyway
@@ -273,6 +288,8 @@ class Director:
         chance = self.base_chance * (0.55 + 0.75 * self.energy)
         if addressed or probe:
             chance = max(chance, 0.9)
+        if asked and alone_with:
+            chance = 1.0        # one other person, and they asked you something
         elif since_i_spoke < 8.0:
             chance *= 0.35          # you just talked, let somebody else go
         elif since_i_spoke > 45.0:
