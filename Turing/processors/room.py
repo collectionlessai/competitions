@@ -499,6 +499,17 @@ class RoomSense:
         recent = self.room_gaps[-12:]
         return statistics.median(recent) if len(recent) >= 3 else 12.0
 
+    @property
+    def pace_known(self) -> bool:
+        """Whether `pace` is a measurement rather than the stand-in.
+
+        The difference matters wherever the answer decides something. A room
+        that has not produced three gaps yet has not shown it is moving, and
+        "the room moved on while we were thinking" is not a claim that can be
+        made about a room which has not been observed to move at all.
+        """
+        return len(self.room_gaps) >= 3
+
     def _note_roster(self, text: str, joined: bool) -> None:
         for name in BOLD.findall(text):
             name = name.strip()

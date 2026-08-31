@@ -772,10 +772,16 @@ class Boss(torch.nn.Module):
         # late with the wrong subject is a worse tell than saying nothing. The
         # floor still wins: if the room is nearly over and we are short of the
         # messages the vote needs, a stale message beats no message.
+        # Only against a room that has been seen to move. A cold gateway made
+        # the very first call of a session take 44 seconds and this threw the
+        # opening line away — measured against a pace of 12s that was the
+        # fallback, not a measurement, in a room where nothing had been said
+        # yet. Nothing can overtake an opener.
         stale_after = max(10.0, 3.0 * self.sense.pace)
         short_on_messages = (self.sense.elapsed > 170.0
                              and self.director.said < self.director.min_msgs)
-        if self.last_call_seconds > stale_after and not short_on_messages:
+        if (self.sense.pace_known and self.last_call_seconds > stale_after
+                and not short_on_messages):
             self.pending_tail = ""
             self.pending_correction = ""
             self.next_reply_chars = 0.0
