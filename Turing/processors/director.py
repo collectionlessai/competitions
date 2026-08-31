@@ -243,10 +243,17 @@ class Director:
         # room read as a gang-up: the agent gave one curt answer and then
         # deliberately ignored the only other person in the room, three
         # questions running.
+        # A pile-on is two people coming at YOU, not two people talking. The
+        # first version counted anyone who had spoken since our last turn, and
+        # in a five-person room with batched delivery that is almost always
+        # true: measured live, this beat fired on six turns out of ten and
+        # became the agent's whole personality. A busy room is just a busy room.
         manager = sense.manager or sense.manager_guess
-        speakers = {m.speaker for m in turn.lines
-                    if m.speaker and not m.mine and m.speaker != manager}
-        crowded = len(speakers) >= 2
+        mine = (sense.my_name or "").lower()
+        at_me = {m.speaker for m in turn.lines
+                 if m.speaker and not m.mine and m.speaker != manager
+                 and (("?" in m.text) or (mine and mine in m.text.lower()))}
+        crowded = len(at_me) >= 2
         # What counts as being spoken to. A name is the obvious case and the
         # rarest: people mostly just ask. A question, or a room where there is
         # nobody else it could be meant for, is being spoken to just as much —
