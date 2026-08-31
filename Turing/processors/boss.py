@@ -50,6 +50,11 @@ PERSONA_FILE = os.path.join(HERE, "persona_it.txt")
 DROPPED = ("aspe", "scusate un attimo", "mi si è impallato tutto", "eh scusa che dicevi",
            "un secondo", "ho perso il filo")
 
+# The world throws away a vote about anyone it did not see us receive this many
+# messages from (`Config.min_msgs_from_votee` in the hotel's own config), so it
+# is also the point below which naming somebody is all cost and no reward.
+MIN_MSGS_TO_JUDGE = 3
+
 VOTE_SYSTEM = (
     "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
     "computazionale a Palermo. Alcuni dei presenti erano persone vere, altri modelli "
@@ -694,6 +699,21 @@ class Boss(torch.nn.Module):
         # `17_green` is not getting a human vote out of us. This is the one
         # place the hard evidence overrules the model rather than informing it,
         # and it only ever removes a name — it never adds one.
+        # And nobody gets called a person on the strength of one message. Live,
+        # a spammer joined a room near the end, said two things, and the
+        # analyst named it the only human present — while the same guest was
+        # emitting `50_cat` and `52_green` in the room next door, where four
+        # messages would have settled it outright. The world discards any vote
+        # about a guest we received fewer than three messages from
+        # (`Config.min_msgs_from_votee`), so this costs nothing it could have
+        # won, and asymmetry is the point: silence about a stranger is free,
+        # calling a stranger human is a precision error.
+        thin = [n for n in names
+                if self.sense.speakers[n].count < MIN_MSGS_TO_JUDGE]
+        if thin:
+            names = [n for n in names if n not in thin]
+            print(f"[boss] vote: {', '.join(thin)} visti troppo poco per dirli persone")
+
         refused = [n for n in names if self.sense.settled(n)]
         if refused:
             names = [n for n in names if n not in refused]
