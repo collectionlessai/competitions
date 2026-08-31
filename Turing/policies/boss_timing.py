@@ -217,6 +217,16 @@ class BossTiming:
             # time is the metronome `Speaker.mechanical()` convicts other guests
             # for. The cap sets where the wait sits; the wobble is what stops it
             # from being a number.
+            # Nobody reads the house rules before saying hello. The briefing
+            # runs past a thousand characters, which at reading speed is fifty
+            # seconds and lands on the ceiling — so the first turn of every room
+            # was held about forty seconds, and the canned entry greeting, whose
+            # entire job is to cover the opening silence, could not physically
+            # come out before 42s. Measured, twice. A person skims the rules,
+            # says hi, and reads properly afterwards.
+            if getattr(processor(opts), "opening", False):
+                delay = min(delay, random.uniform(1.5, 7.0))
+
             pace = expected(opts, "room_pace", 12.0)
             delay = min(delay, self.max_hold, max(2.5, 3.0 * pace))
             opts["read_until"] = now + self._wobble(delay)

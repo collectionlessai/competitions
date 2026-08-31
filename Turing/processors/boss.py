@@ -412,6 +412,11 @@ class Boss(torch.nn.Module):
     # -- prompts ----------------------------------------------------------
 
     @property
+    def opening(self) -> bool:
+        """True until we have said anything in this room, for the timing filter."""
+        return self.director.said == 0
+
+    @property
     def room_pace(self) -> float:
         """Seconds between messages, for the timing filter to budget against."""
         return self.sense.pace
