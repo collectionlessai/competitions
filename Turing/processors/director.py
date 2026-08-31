@@ -319,6 +319,15 @@ class Director:
                 and all(n in self.called_out for n in sense.obvious_bots())):
             chance *= 0.3
 
+        # Shouting over a flood. Once most of what is arriving is spam from
+        # guests we have already settled, a message costs the same and buys
+        # much less: it scrolls away, and whatever comes back is mixed in with
+        # the noise. Proportional rather than a switch, so a room that is merely
+        # busy is untouched and one that is three-quarters junk goes quiet.
+        noise = sense.noise_share()
+        if noise > 0.5:
+            chance *= 1.0 - 0.6 * min(1.0, (noise - 0.5) / 0.4)
+
         # The floor: too quiet by now and the room is worth nothing, so take it
         forced = (sense.elapsed > 170.0 and self.said < self.min_msgs)
         if not forced and random.random() > chance:

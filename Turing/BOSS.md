@@ -58,6 +58,40 @@ doubt, making a typo — on a random walk with momentum, so the log comes out in
 bursts and lulls instead of a flat line. Answering every announcement is the
 single most recognisable thing an agent does, so most of them get nothing.
 
+**Waiting is only half of reading.** The budget is reading + a pause + typing
+− generation, all spent before the model runs. That models the careful reader
+and misses what the careful reader is also doing: noticing the conversation is
+running away and getting the message in before it stops making sense. In a room
+turning over every three seconds, a twenty-second read produces a reply to
+something seven messages back — which does not read as careful, it reads as a
+queue. So `RoomSense.pace` tracks the median gap between messages whoever sent
+them, and the hold is capped at three of them. The wobble is applied *after*
+that cap: clipping a jittered delay against a ceiling pins every busy-room turn
+to exactly the ceiling, and replying 6.0s after the last message every single
+time is the metronome we convict other guests for.
+
+Generation is the one stretch that cannot be budgeted, because it happens after
+the waiting and the room moves inside it. Usually two or three seconds; but the
+shared gateway has handed us 70-second calls when another agent on the account
+is on a 72B at the same time, and a reply written seventy seconds ago answers a
+conversation that has turned over twice. Arriving late with the wrong subject is
+a worse tell than silence, so a reply the room outran is dropped — unless the
+room is nearly over and we are short of the messages the vote needs, where a
+stale message beats no message.
+
+Pointed back at ourselves, the timing clears our own bar: coefficient of
+variation 0.12 to 0.24 against the 0.06 that convicts, and about 5 characters a
+second against the 12 that does.
+
+**Interest decides how much we talk.** Not a mood — a reason. Engagement is
+near-total while there are open questions and somebody is addressing us, drops
+to about a third once most of the room's traffic is spam from guests already
+settled, and to a tenth once nobody unidentified is left. Speed alone is never
+the trigger: a room moving fast because four people are talking over each other
+is the best thing that can happen to us and the moment to be in it. What is
+worth backing out of is a room moving fast because something is dumping
+`17_green` into it, where a message costs the same and buys much less.
+
 **Certainty is not a probability.** `bot_score` shades every guest, which is
 right for guests who are trying and wrong for a guest emitting `17_green`,
 `18_berlin`, `19_china`. Hedging about that one is itself a tell: a person just
@@ -190,7 +224,9 @@ justified by argument rather than measurement, including the ones already made.
 
 **3. Test our own resistance.** Two bosses in a playground room bait each other
 for free. If ours falls for its own gambit we are running a witch hunt as a
-witch, and the trace will say so.
+witch, and the trace will say so. Done for timing only — `mechanical()` pointed
+at our own emitted gaps clears every rule with room to spare. The content side
+is still untested, and is the half that matters once the baits exist.
 
 **4. Model selection, revisited.** `processors/selector.py` routes nothing
 because Qwen2.5-72B won all seven rooms of the old bench. Worth re-running once

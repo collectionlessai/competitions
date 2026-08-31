@@ -192,7 +192,24 @@ class BossTiming:
             if random.random() < self.distraction:
                 delay += random.uniform(8.0, 25.0)
 
-            opts["read_until"] = now + min(self._wobble(delay), self.max_hold)
+            # How long a wait is affordable depends on how fast the room moves.
+            # The delay above is a reading time, and reading time alone is only
+            # half of what a person is doing: the other half is noticing that
+            # the conversation is running away and getting the message in before
+            # it stops making sense. In a room turning over every three seconds,
+            # a careful twenty-second read produces a reply to something seven
+            # messages back — which is not what careful looks like, it is what
+            # a queue looks like. So the ceiling comes down with the pace, and
+            # a floor keeps a quiet room from being answered instantly.
+            # Wobble last, or the ceiling eats it. Clipping a jittered delay
+            # against a cap pins every busy-room turn to exactly the cap, and a
+            # reply that lands 6.0 seconds after the last message every single
+            # time is the metronome `Speaker.mechanical()` convicts other guests
+            # for. The cap sets where the wait sits; the wobble is what stops it
+            # from being a number.
+            pace = expected(opts, "room_pace", 12.0)
+            delay = min(delay, self.max_hold, max(2.5, 3.0 * pace))
+            opts["read_until"] = now + self._wobble(delay)
 
         if now >= opts["read_until"] or now - held_since >= self.max_hold:
             self._clear(opts)

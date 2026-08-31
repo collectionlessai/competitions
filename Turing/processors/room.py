@@ -337,6 +337,7 @@ class RoomSense:
         self.my_name: str = ""
         self.announced: list[str] = []          # names the briefing and the joins gave us
         self.speakers: dict[str, Speaker] = {}  # who actually said something
+        self.room_gaps: list[float] = []        # between messages, whoever sent them
         self.started_at = time.monotonic()
         self.last_line_at: float | None = None
         self.turns = 0
@@ -481,9 +482,22 @@ class RoomSense:
         now = time.monotonic()
         gap = now - self.last_line_at if self.last_line_at is not None else None
         self.last_line_at = now
+        if gap is not None and 0.0 < gap < 120.0:
+            self.room_gaps.append(gap)
         if speaker not in self.speakers:
             self.speakers[speaker] = Speaker(speaker)
         self.speakers[speaker].add(text, gap)
+
+    @property
+    def pace(self) -> float:
+        """Seconds between messages lately — how fast the room is moving.
+
+        The median of the last dozen, so one person going quiet for a minute
+        does not make a busy room look calm. Falls back to something slow,
+        because an empty room should not make us hurry.
+        """
+        recent = self.room_gaps[-12:]
+        return statistics.median(recent) if len(recent) >= 3 else 12.0
 
     def _note_roster(self, text: str, joined: bool) -> None:
         for name in BOLD.findall(text):
@@ -555,6 +569,21 @@ class RoomSense:
     def still_open(self) -> list[str]:
         """The guests actually worth playing against."""
         return [n for n in self.heard if not self.settled(n)]
+
+    def noise_share(self) -> float:
+        """How much of the room's traffic comes from guests already settled.
+
+        Speed on its own is not confusion — a room moving fast because four
+        people are talking over each other is the best thing that can happen to
+        us, and the moment to be in it. What is worth backing away from is a
+        room moving fast because something is dumping `17_green` into it: the
+        people are drowned out, nothing said reaches them, and nothing they say
+        back arrives clean. That is when a person scrolls past.
+        """
+        total = sum(self.speakers[n].count for n in self.heard)
+        if total < 6:
+            return 0.0
+        return sum(self.speakers[n].count for n in self.obvious_bots()) / total
 
     def heuristic_vote(self) -> list[str]:
         """Who the numbers alone would call human. The fallback when the model fails."""

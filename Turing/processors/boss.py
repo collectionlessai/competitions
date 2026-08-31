@@ -382,6 +382,11 @@ class Boss(torch.nn.Module):
     # -- prompts ----------------------------------------------------------
 
     @property
+    def room_pace(self) -> float:
+        """Seconds between messages, for the timing filter to budget against."""
+        return self.sense.pace
+
+    @property
     def device(self) -> str:
         """Phone or laptop, right now."""
         return device_now(self.device_pref, self.context.during_conference()
@@ -756,6 +761,28 @@ class Boss(torch.nn.Module):
 
         reply = self._say(beat, last)
         if not reply:
+            return ""
+
+        # Overtaken while we were thinking. The whole waiting budget is spent
+        # before the model runs, so generation is the one stretch where the room
+        # moves and we cannot see it — normally two or three seconds, but the
+        # shared gateway has handed us 70-second calls when another agent on the
+        # account is on a 72B at the same time. A reply written seventy seconds
+        # ago answers a conversation that has moved on twice over, and arriving
+        # late with the wrong subject is a worse tell than saying nothing. The
+        # floor still wins: if the room is nearly over and we are short of the
+        # messages the vote needs, a stale message beats no message.
+        stale_after = max(10.0, 3.0 * self.sense.pace)
+        short_on_messages = (self.sense.elapsed > 170.0
+                             and self.director.said < self.director.min_msgs)
+        if self.last_call_seconds > stale_after and not short_on_messages:
+            self.pending_tail = ""
+            self.pending_correction = ""
+            self.next_reply_chars = 0.0
+            if TRACE:
+                print(f"[boss--] scartato {reply!r} "
+                      f"(gen={self.last_call_seconds:.1f}s, ritmo={self.sense.pace:.1f}s)",
+                      flush=True)
             return ""
         if TRACE:
             print(f"[boss->] {reply!r}  (style={beat.style}, "
