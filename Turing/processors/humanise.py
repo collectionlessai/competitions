@@ -235,7 +235,7 @@ def _typo_word(word: str) -> str:
     """One plausible slip on one word, or the word back if none applies."""
     if len(word) < 4:
         return word
-    kinds = ["swap", "neighbour"]
+    kinds = ["swap", "neighbour", "drop", "double"]
     if re.search(r"(.)\1", word):
         kinds.append("single")
     if any(c in word for c in "àèéìòù"):
@@ -248,6 +248,10 @@ def _typo_word(word: str) -> str:
 
     if kind == "swap":
         return word[:i] + word[i + 1] + word[i] + word[i + 2:]
+    if kind == "drop":                       # the commonest slip of all
+        return word[:i] + word[i + 1:]
+    if kind == "double":                     # the finger that bounced
+        return word[:i] + word[i] + word[i:]
     if kind == "single":
         return re.sub(r"(.)\1", r"\1", word, count=1)
     if kind == "accent":

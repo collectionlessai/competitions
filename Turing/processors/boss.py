@@ -170,22 +170,35 @@ def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]
     return "\n".join(lines), found
 
 
-STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)")
+STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)"
+                        r"(?:\s+dev=(\w+))?")
 
 # What a persona writes like when its block does not say. The population mean
 # from the Aalto mobile-typing study (36.2 WPM = 3.0 cps at five characters a
 # word), a visible-typo rate discounted well below the 2.3% per-character figure
 # those transcription studies report, and a modest chance of bothering to send
 # the "*parola" afterwards.
-DEFAULT_STYLE = (3.0, 0.12, 0.25)
+DEFAULT_STYLE = (3.0, 0.12, 0.25, "phone")
 
 
 def read_style(block: str) -> tuple:
-    """`(cps, typo_chance, correction_chance)` for one persona."""
+    """`(cps, typo_chance, correction_chance, device)` for one persona."""
     found = STYLE_LINE.search(block)
     if not found:
         return DEFAULT_STYLE
-    return (float(found.group(1)), float(found.group(2)), float(found.group(3)))
+    return (float(found.group(1)), float(found.group(2)), float(found.group(3)),
+            found.group(4) or "phone")
+
+
+def device_now(preference: str, in_session: bool) -> str:
+    """Which one they are actually holding.
+
+    Somebody who brought a laptop uses it in the sessions and the phone in the
+    evening; somebody who never brings one is on the phone throughout.
+    """
+    if preference in ("pc", "phone"):
+        return preference
+    return "pc" if in_session else "phone"
 
 
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
@@ -239,7 +252,8 @@ class Boss(torch.nn.Module):
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
-        self.typing_cps, self.typo_chance, self.correct_chance = read_style(self.persona)
+        (self.typing_cps, self.typo_chance,
+         self.correct_chance, self.device_pref) = read_style(self.persona)
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
@@ -309,7 +323,8 @@ class Boss(torch.nn.Module):
         self.persona = random.choice(choices)
         # The writing style travels with the person, so there is no single
         # "this agent's grafia" to learn across rooms
-        self.typing_cps, self.typo_chance, self.correct_chance = read_style(self.persona)
+        (self.typing_cps, self.typo_chance,
+         self.correct_chance, self.device_pref) = read_style(self.persona)
         self.conv.reset()
         self.director.new_room()
         self.pending_correction = ""
@@ -321,6 +336,12 @@ class Boss(torch.nn.Module):
         self.last_spoke_at = -1.0
 
     # -- prompts ----------------------------------------------------------
+
+    @property
+    def device(self) -> str:
+        """Phone or laptop, right now."""
+        return device_now(self.device_pref, self.context.during_conference()
+                          and bool(self.context.now_line()))
 
     def _prompt(self, beat) -> str:
         """The turn as one string, since the gateway takes one string.
@@ -347,6 +368,15 @@ class Boss(torch.nn.Module):
         if others:
             where.append(f"Gli altri sono {', '.join(others)}.")
         parts.append("\n".join(where))
+
+        if self.device == "pc":
+            parts.append("STAI SCRIVENDO DAL PORTATILE\n"
+                         "Quindi ti viene più facile scrivere: frasi un po' più lunghe, "
+                         "punteggiatura più normale. Resta comunque chat, non una mail.")
+        else:
+            parts.append("STAI SCRIVENDO DAL TELEFONO\n"
+                         "Quindi corto, tutto minuscolo, poca punteggiatura, e ogni tanto "
+                         "una parola storta.")
 
         transcript = self.conv.transcript(limit=30)
         parts.append("CONVERSAZIONE (tu sei 'io')\n"
@@ -426,7 +456,12 @@ class Boss(torch.nn.Module):
         reply = humanise.cap_words(reply, beat.max_words)
         reply = humanise.chat_case(reply, lower_chance=beat.lower_chance)
 
-        if random.random() < min(beat.typo_chance * 2.0, self.typo_chance):
+        on_phone = self.device == "phone"
+        if not on_phone:
+            # A keyboard forgives: fewer slips, and a longer leash on length
+            reply = humanise.cap_words(reply, beat.max_words + 6)
+        if random.random() < min(beat.typo_chance * 2.0,
+                                 self.typo_chance * (1.0 if on_phone else 0.45)):
             reply, correct = humanise.add_typo(reply)
             if correct and random.random() < self.correct_chance:
                 self.pending_correction = correct
