@@ -298,6 +298,7 @@ class Boss(torch.nn.Module):
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
         self.recent_openers: list[str] = []       # so every line does not start the same way
+        self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
         self._profiled_at = 0                     # messages seen at last profiling
@@ -374,6 +375,7 @@ class Boss(torch.nn.Module):
         self.next_reply_chars = 0.0
         self.my_vote = None
         self.recent_openers = []
+        self.recent_mine = []
 
         # `sense.elapsed` restarts with the room, so a stale value from the last
         # one reads as "spoke in the future" and damps the whole room
@@ -523,10 +525,22 @@ class Boss(torch.nn.Module):
                                       + weight * self.last_call_seconds)
 
     def _note_opener(self, reply: str) -> None:
-        """Remember how this line started, so the next few do not start the same."""
+        """Remember how this line started, so the next few do not start the same.
+
+        Shapes, not words. Measured live, ten of thirteen messages opened by
+        addressing somebody by name — `ben,` `cal,` `zon,` — and the guard never
+        fired once, because as literal strings those are three different
+        openers. They are one habit. A guest whose every line begins "name," is
+        as findable as one whose every line begins "non", which is why a model
+        was rejected in the bench for exactly this at half the rate.
+        """
         words = reply.split()
-        if words:
-            self.recent_openers = (self.recent_openers + [words[0].lower().strip(",.!?")])[-4:]
+        if not words:
+            return
+        first = words[0].lower().strip(",.!?:")
+        if first in {n.lower() for n in self.sense.heard} or first == "raga":
+            first = "@nome"
+        self.recent_openers = (self.recent_openers + [first])[-4:]
 
     # -- the chat path ----------------------------------------------------
 
@@ -567,6 +581,31 @@ class Boss(torch.nn.Module):
             out = humanise.deflect(avoid=self.recent_deflections)
             self.recent_deflections = (self.recent_deflections + [out])[-4:]
             return humanise.safe(out)
+
+        # Ration the vocative. Addressing somebody by name is normal; opening
+        # every message that way is a signature, and the model will not stop on
+        # its own because each instance in isolation is the natural thing to
+        # write. A person reaches for a name to disambiguate or to switch who
+        # they are talking to — call it one message in three or four.
+        #
+        # Pressure, not a quota. A hard "never twice running" strips exactly
+        # every third message, which is its own detectable rhythm; the chance
+        # rises with how much the habit has been indulged lately and leaves the
+        # rate ragged.
+        used = self.recent_openers[-3:].count("@nome")
+        if used and random.random() < (0.55 if used == 1 else 0.9):
+            reply = humanise.drop_vocative(reply, self.sense.heard)
+
+        # Already said, and recently. Silence beats saying it a third time —
+        # and it costs nothing, because the alternative is a second model call
+        # for a turn nobody is waiting on.
+        # Somebody asking us directly is not us going on about it, so staying
+        # on a subject we raised is only a fault when nobody asked
+        asked_us = "?" in last_text and (self.sense.my_name or "").lower() in last_text.lower()
+        if not asked_us and humanise.repeats_self(reply, self.recent_mine[-2:]):
+            if TRACE:
+                print(f"[boss--] ripetizione {reply!r}", flush=True)
+            return ""
 
         reply = humanise.drop_maskable(reply)
         reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)
@@ -796,6 +835,7 @@ class Boss(torch.nn.Module):
 
         self.conv.remember(reply)
         self._note_opener(reply)
+        self.recent_mine = (self.recent_mine + [reply])[-3:]
         self._note_pace(len(reply))
         self._note_pad(reply, beat)
         self.sense.i_spoke()

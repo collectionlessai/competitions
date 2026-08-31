@@ -429,3 +429,56 @@ def safe(text: str, exit_word: str = "exit") -> str:
     if text.strip().lower() == exit_word.lower():
         return "ah no scusate ho sbagliato a scrivere"
     return text
+
+
+def drop_vocative(text: str, names) -> str:
+    """Strip a leading "Name," when we have just used one.
+
+    Asking the model not to do this does not work — it is the most natural way
+    to address somebody in a group chat, and it is genuinely what people do,
+    just not every single time. So the vocative is rationed here rather than
+    forbidden there: the model keeps writing whatever it writes, and a repeat
+    within the last few turns loses the address. What is left still reads as a
+    reply, because the room already knows who is being answered.
+    """
+    match = re.match(r"\s*([A-Za-zÀ-ÿ]{2,15})\s*,\s*(\S.*)", text, re.DOTALL)
+    if not match:
+        return text
+    if match.group(1).lower() not in {str(n).lower() for n in names}:
+        return text
+    rest = match.group(2)
+    return rest[0].lower() + rest[1:] if rest else text
+
+
+# Words that carry no topic, so a run of them is not a repeated subject
+_FILLER = {
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "di", "a", "da",
+    "in", "con", "su", "per", "tra", "fra", "del", "della", "dei", "delle",
+    "al", "alla", "ai", "alle", "dal", "dalla", "nel", "nella", "sul", "sulla",
+    "e", "ed", "o", "ma", "che", "chi", "cosa", "non", "ci", "si", "mi", "ti",
+    "ho", "hai", "ha", "sono", "sei", "è", "era", "come", "qui", "qua", "poi",
+    "anche", "pure", "solo", "già", "tutto", "questo", "quella", "io", "tu",
+}
+
+
+def repeats_self(text: str, mine, need: int = 2) -> bool:
+    """Whether this raises a subject we have just finished raising.
+
+    Measured live, one boss brought up "il talk sul parsing" in three
+    consecutive messages. The model could see all three in the transcript it
+    was given and did it anyway, which is what makes this worth a hard check
+    rather than another line of instruction.
+
+    Contiguous word runs were the first attempt and they do not survive
+    ordinary variation: "il talk sul parsing" and "anch'io il talk sul parsing"
+    share no three-word run once the filler is dropped, because "anch" lands in
+    the middle. So this counts distinctive words in common instead — four
+    letters or more, filler excluded — and wants two of them, which "che ne
+    pensi" and the rest of the scaffolding cannot supply between them.
+    """
+    def solid(s):
+        return {w for w in re.findall(r"[a-zà-ÿ]+", s.lower())
+                if len(w) >= 4 and w not in _FILLER}
+
+    here = solid(text)
+    return any(len(here & solid(old)) >= need for old in mine)
