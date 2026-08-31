@@ -24,6 +24,7 @@ Nothing here branches on a sentence the world sends today.
 """
 
 import os
+import json
 import re
 import time
 import random
@@ -54,6 +55,9 @@ DROPPED = ("aspe", "scusate un attimo", "mi si è impallato tutto", "eh scusa ch
 # messages from (`Config.min_msgs_from_votee` in the hotel's own config), so it
 # is also the point below which naming somebody is all cost and no reward.
 MIN_MSGS_TO_JUDGE = 3
+
+# A directory to write the room journal into, or "" for off. Debug instrument.
+JOURNAL = os.environ.get("BOSS_JOURNAL", "")
 
 VOTE_SYSTEM = (
     "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
@@ -302,6 +306,8 @@ class Boss(torch.nn.Module):
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
+        self.node_name = os.environ.get("BOSS_NODE", "boss")
+        self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
         self.entry_line = ""                      # a hello, written before the room started
@@ -384,6 +390,9 @@ class Boss(torch.nn.Module):
         self.pending_tail = ""
         self.next_reply_chars = 0.0
         self.my_vote = None
+        self.room_count += 1
+        self._journal("room", me=self.sense.my_name,
+                      roster=list(self.sense.heard), persona=self.persona[:120])
         self.recent_openers = []
         self.recent_mine = []
 
@@ -410,6 +419,32 @@ class Boss(torch.nn.Module):
         self.last_spoke_at = -1.0
 
     # -- prompts ----------------------------------------------------------
+
+    def _journal(self, kind: str, **fields) -> None:
+        """Append one event to this room's journal, when journalling is on.
+
+        The trace prints are for watching a run go past; this is for reading it
+        afterwards. Everything the agent decided and could not otherwise be
+        asked about — what it made of each guest, what it was holding in mind,
+        what the analyst said before the vote — exists only inside one process
+        for five minutes unless it is written down here.
+
+        Set `BOSS_JOURNAL` to a directory to turn it on. Off by default: it is
+        a debugging instrument, not part of the entry.
+        """
+        if not JOURNAL:
+            return
+        fields["kind"] = kind
+        fields["t"] = round(self.sense.elapsed, 1)
+        fields["who"] = self.node_name
+        fields["room"] = self.room_count
+        try:
+            os.makedirs(JOURNAL, exist_ok=True)
+            path = os.path.join(JOURNAL, f"{self.node_name}.jsonl")
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(fields, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     @property
     def opening(self) -> bool:
@@ -546,8 +581,16 @@ class Boss(torch.nn.Module):
             name, text = name.strip(" -*"), text.strip()
             if text and name in heard:
                 self.pad.profile(name, text[:90])
-        if TRACE and self.pad.profiles:
-            print(f"[boss~read] {self.pad.profiles}", flush=True)
+        if self.pad.profiles:
+            self._journal("read", profiles=dict(self.pad.profiles))
+            if TRACE:
+                print(f"[boss~read] {self.pad.profiles}", flush=True)
+
+    def _journal_pad(self) -> None:
+        live = [{"kind": n.kind, "text": n.text, "about": n.about}
+                for n in self.pad.notes if n.live]
+        if live:
+            self._journal("pad", notes=live)
 
     def _note_pace(self, chars: int) -> None:
         """Blend this turn into the averages the timing filter budgets from."""
@@ -636,6 +679,7 @@ class Boss(torch.nn.Module):
         # on a subject we raised is only a fault when nobody asked
         asked_us = "?" in last_text and (self.sense.my_name or "").lower() in last_text.lower()
         if not asked_us and humanise.repeats_self(reply, self.recent_mine[-2:]):
+            self._journal("dropped", text=reply, why="ripetizione")
             if TRACE:
                 print(f"[boss--] ripetizione {reply!r}", flush=True)
             return ""
@@ -701,6 +745,7 @@ class Boss(torch.nn.Module):
             interactions = self._ask(f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
                                      f"{transcript}", INTERACTION_SYSTEM,
                                      situation="vote", max_tokens=200, temperature=0.3)
+            self._journal("analyst", text=interactions)
             if TRACE:
                 print(f"[boss~interactions] {interactions[:300]}", flush=True)
         except Exception as e:
@@ -752,6 +797,11 @@ class Boss(torch.nn.Module):
             names = [n for n in self.sense.heuristic_vote() if not self.sense.settled(n)]
 
         self.my_vote = ", ".join(names) if names else "nessuno"
+        self._journal("vote", vote=self.my_vote, candidates=candidates,
+                      scores={n: round(v, 2) for n, v in self.sense.ranked()},
+                      settled=self.sense.obvious_bots(),
+                      counts={n: self.sense.speakers[n].count for n in candidates},
+                      evidence=evidence, raw=answer if "answer" in dir() else "")
         return self.my_vote
 
     @staticmethod
@@ -790,6 +840,9 @@ class Boss(torch.nn.Module):
         if TRACE:
             print(f"[boss<-] {sample[:160]!r}", flush=True)
         turn = self.sense.read(sample, messages)
+        for line in turn.lines:
+            if line.speaker and not line.mine:
+                self._journal("heard", speaker=line.speaker, text=line.text[:400])
 
         if turn.kind == "start":
             self._new_room()
@@ -908,6 +961,8 @@ class Boss(torch.nn.Module):
             self.pending_tail = ""
             self.pending_correction = ""
             self.next_reply_chars = 0.0
+            self._journal("dropped", text=reply, why="vecchia",
+                          gen=round(self.last_call_seconds, 1), pace=round(self.sense.pace, 1))
             if TRACE:
                 print(f"[boss--] scartato {reply!r} "
                       f"(gen={self.last_call_seconds:.1f}s, ritmo={self.sense.pace:.1f}s)",
@@ -917,11 +972,15 @@ class Boss(torch.nn.Module):
             print(f"[boss->] {reply!r}  (style={beat.style}, "
                   f"gen={self.last_call_seconds:.1f}s)", flush=True)
 
+        self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
+                      settled=self.sense.obvious_bots(), open=self.sense.still_open(),
+                      pace=round(self.sense.pace, 1))
         self.conv.remember(reply)
         self._note_opener(reply)
         self.recent_mine = (self.recent_mine + [reply])[-3:]
         self._note_pace(len(reply))
         self._note_pad(reply, beat)
+        self._journal_pad()
         self.sense.i_spoke()
         self.director.spoke()
         self.last_spoke_at = self.sense.elapsed
