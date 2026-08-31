@@ -178,7 +178,12 @@ class BossTiming:
             # off the same way, and comes out of the budget rather than adding
             # to it. Floors keep a silent turn from waiting for nothing.
             cps = expected(opts, "typing_cps", self.typing_cps)
-            typing = expected(opts, "mean_reply_chars", 40.0) / cps
+            # A follow-up the processor has already written — the rest of a
+            # message sent too early, or a "*parola" correction — costs what
+            # THAT costs to type, not what an average new message costs
+            chars = expected(opts, "next_reply_chars", 0.0) \
+                or expected(opts, "mean_reply_chars", 40.0)
+            typing = chars / cps
             generating = expected(opts, "mean_call_seconds", 2.0)
             delay += max(0.0, typing - generating)
 

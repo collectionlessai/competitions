@@ -136,8 +136,63 @@ is **gated** (403, needs HuggingFace connected for the organization),
 ANITA-NEXT-24B answered at 124s a turn, and Gemma has no system role at all.
 
 ## Still to do
-- **Tune the register against real rooms.** The "middle" — some slang and
-  imperfection, no crudeness — is a guess until people have played against it.
-  `persona_it.txt` and the `Director` constants are the two dials.
-- **Node name.** `NODE_NAME = "TuringBoss"` claims a permanent slot on the
-  account. Reuse it between runs rather than inventing a new one.
+
+Ordered. Everything above this line is built and passes `bench/offline_check.py`.
+
+**1. Baits, with bookkeeping.** `Pad` already has the `bait` note kind and
+`open_bait()`, and nothing fills them. Three shapes, all to be used sparingly,
+at different points in a room, worded differently by each persona so they do not
+become a signature:
+
+- *announce a tactic, then run it* — "ho un'idea, proviamo a confondere i bot",
+  then a deliberate wall of nonsense. A person laughs, joins in or improves it;
+  a weak model complies or answers it earnestly. The announcement is itself
+  camouflage: no bot declares a plan and follows through.
+- *deliberate small error* — say the Boleda talk was yesterday when it was this
+  morning. Somebody who was there corrects you almost reflexively. Cheaper than
+  the first, reads as ordinary conversation, and generated and checked straight
+  from `context_it.txt`.
+- *insider question* — ask something only this room's week can answer.
+
+Every bait goes on the pad with who was present; every reply to it is scored and
+handed to the analyst as ELICITED evidence, which beats aggregate statistics
+because it is timestamped and attributable. Weight the answers asymmetrically:
+knowing lifts somebody toward human, not knowing barely moves them, because a
+real attendee who skipped the morning genuinely cannot describe the coffee queue.
+
+**2. The measurement harness.** There is still no ground truth anywhere. In
+`TuringPlayground` we know which nodes are bosses, which are stubs and which is
+a person, so every vote cast there can be scored into real precision, recall and
+F1 — and, separately, the F1 of the numeric score alone, the analyst alone, and
+the two together. Until that exists, every detection change in this entry is
+justified by argument rather than measurement, including the ones already made.
+
+**3. Test our own resistance.** Two bosses in a playground room bait each other
+for free. If ours falls for its own gambit we are running a witch hunt as a
+witch, and the trace will say so.
+
+**4. Model selection, revisited.** `processors/selector.py` routes nothing
+because Qwen2.5-72B won all seven rooms of the old bench. Worth re-running once
+the prompt work has settled, and note the timing rework removed the value of a
+fast model entirely: generation time is subtracted from the typing budget, so
+anything faster than the budget looks identical in the room.
+
+**5. Node hygiene.** Slots are concurrent, not permanent — running more than
+about eight nodes at once hits the ceiling. Reuse `TuringBoss`, `TuringBoss2`
+and `Grazia` rather than inventing names.
+
+**6. The conference itself.** `context_it.txt` `## NOTE` is the only thing a
+competitor cannot reproduce by scraping the programme, as we did. It has to be
+fed by hand while the conference runs. `## PAROLE` feeds detection the same way.
+
+## Known, not ours to fix
+
+- The world hard-fails when the account profile has no `email`
+  (`guest.py::init`), and it takes down **human** guests specifically: a bot
+  skips that confirmation step, a person loops on the traceback forever. Patched
+  in our local copy only.
+- `managers.txt` matches on e-mail, but identity moved to the account handle
+  (`owner_handle`: "the address is not an identifier anymore"). Local copy has
+  `angry-galois/...` lines added.
+- `FeatherlessAPI._ensure_server` opens with `import fcntl` and cannot be
+  constructed on Windows. Shimmed in `processors/featherless.py`.

@@ -289,6 +289,8 @@ class Boss(torch.nn.Module):
         (self.typing_cps, self.typo_chance,
          self.correct_chance, self.device_pref) = read_style(self.persona)
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
+        self.pending_tail = ""            # the rest of a message sent too early
+        self.next_reply_chars = 0.0       # what the timing filter should budget next
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
@@ -365,6 +367,8 @@ class Boss(torch.nn.Module):
         self._profiled_at = 0
         self.director.new_room()
         self.pending_correction = ""
+        self.pending_tail = ""
+        self.next_reply_chars = 0.0
         self.my_vote = None
         self.recent_openers = []
 
@@ -559,6 +563,21 @@ class Boss(torch.nn.Module):
             if correct and random.random() < self.correct_chance:
                 self.pending_correction = correct
 
+        # Occasionally the thumb goes before the sentence does. Rarer on a
+        # keyboard, where you can see the whole line before you commit to it.
+        early = 0.07 if on_phone else 0.03
+        if not self.pending_correction and random.random() < early:
+            reply, tail = humanise.send_too_early(reply)
+            if tail:
+                self.pending_tail = tail
+                # The rest follows at the pace of typing the rest, not at the
+                # pace of writing a whole new message
+                self.next_reply_chars = float(len(tail))
+
+        if self.pending_correction:
+            # Reread, notice, and type "*parola": a short beat, not a full turn
+            self.next_reply_chars = float(len(self.pending_correction) + 1)
+
         return humanise.safe(reply)
 
     # -- the vote path ----------------------------------------------------
@@ -675,6 +694,20 @@ class Boss(torch.nn.Module):
         if (self.my_vote is not None and turn.kind in ("reminder", "roster", "quiet")
                 and (self.sense.voting or turn.vote_score >= 2)):
             return self.my_vote
+
+        # Owed from last turn: the rest of a message the thumb cut short. This
+        # one is not optional — a fragment nobody ever finishes is the bug this
+        # was modelled on, not the behaviour
+        if self.pending_tail:
+            tail, self.pending_tail = self.pending_tail, ""
+            self.conv.remember(tail)
+            self.sense.i_spoke()
+            self.director.spoke()
+            self.last_spoke_at = self.sense.elapsed
+            self.next_reply_chars = 0.0
+            if TRACE:
+                print(f"[boss->] {tail!r}  (il resto)", flush=True)
+            return tail
 
         # Owed from last turn: the correction to the typo we made on purpose
         if self.pending_correction and turn.kind == "chat" and random.random() < 0.7:

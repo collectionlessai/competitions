@@ -289,6 +289,26 @@ def add_typo(text: str) -> tuple[str, str]:
     return " ".join(words), correct
 
 
+def send_too_early(text: str) -> tuple:
+    """Split a message the way a thumb that hit send does.
+
+    Returns `(what went out, what still has to)`, or `(text, "")` when the
+    message is too short to break sensibly.
+
+    The break sits late — around three quarters through — because that is when
+    it happens: you are nearly done, the thought is finished in your head, and
+    the thumb moves before the sentence does. It is NOT the same thing as the
+    length-budget truncation this file used to do, and the difference is the
+    whole point: the remainder is not discarded, it is owed. The caller must
+    send it, or this is just the old amputation bug wearing a costume.
+    """
+    words = text.split()
+    if len(words) < 6:
+        return text, ""
+    cut = random.randint(max(3, int(len(words) * 0.6)), len(words) - 2)
+    return " ".join(words[:cut]), " ".join(words[cut:])
+
+
 def is_assistant(text: str) -> bool:
     """True when the model answered as itself rather than as the persona."""
     return bool(ASSISTANT.search(text))
