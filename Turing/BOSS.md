@@ -215,7 +215,32 @@ because it is timestamped and attributable. Weight the answers asymmetrically:
 knowing lifts somebody toward human, not knowing barely moves them, because a
 real attendee who skipped the morning genuinely cannot describe the coffee queue.
 
-**2. The measurement harness.** There is still no ground truth anywhere. In
+**2. The measurement harness.** Built, and it has produced its first number.
+`BOSS_JOURNAL=<dir>` makes the processor write every decision it takes as JSON
+lines — what arrived, what it said and in which style, what it made of each
+guest, what it was holding on the pad, what the analyst concluded, what it threw
+away and why, and the vote with the evidence behind it. `python -m
+bench.room_report <dir>` renders a room top to bottom with all of that
+interleaved. It is a debug instrument: off unless the variable is set.
+
+**The first measurement says the detection does not work.** Six rooms against
+the lab's own guests (`collectionlessai/Turing-Hotel`, real personas and pacing)
+plus a second boss, every guest a bot, so the right answer was `nessuno` every
+time. One vote in six got it. Eleven names were wrongly called human, and two of
+them were our own other boss, which the numeric index scored as the *most* human
+guest in its room both times. Precision, on the only ground truth we have, is
+zero.
+
+Two things follow. The numeric index does not separate a good agent from a
+person — it separates effort, and our entry is built to spend effort. And the
+analyst, which is the part that could tell the difference, was silently broken:
+four calls in six returned nothing but the roster echoed back, because the
+prompt opens with "Partecipanti da analizzare: ..." and the model completed that
+sentence instead of starting its own. Now retried and, failing that, dropped
+rather than fed to the vote as an empty heading. Re-measure before believing any
+of the above is fixed.
+
+**2b. The old note, kept because it is still half true.** In
 `TuringPlayground` we know which nodes are bosses, which are stubs and which is
 a person, so every vote cast there can be scored into real precision, recall and
 F1 — and, separately, the F1 of the numeric score alone, the analyst alone, and
