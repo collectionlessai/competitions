@@ -905,6 +905,15 @@ class Boss(torch.nn.Module):
 
         # A hello, if one is due and nothing has been said yet. Before the
         # director, before the model, before anything that can decline it.
+        # ...unless we already opened our mouth. The scheduled hello exists to
+        # cover the silence before the model can produce anything; when the
+        # model got there first the silence never happened, and firing anyway
+        # introduces us a second time. Seen live: "ciao gente, qui zia" from the
+        # model, then "ma quanti siete" from here, then a reflex "ehilà" — three
+        # greetings in a row, which is the opposite of the problem this solves.
+        if self.director.said:
+            self.entry_line = ""
+
         if self.entry_line and turn.kind != "vote":
             if self.sense.elapsed >= self.entry_at:
                 line, self.entry_line = self.entry_line, ""
