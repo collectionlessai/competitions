@@ -220,6 +220,64 @@ class Speaker:
 
         return score / weight if weight else 0.5
 
+    def mechanical(self) -> str:
+        """Why this guest is *obviously* a machine, or "" when it is not obvious.
+
+        Separate from `bot_score`, which is a shaded judgement about guests who
+        are trying to pass. This is for the ones who are not: a guest emitting
+        `17_green`, `18_berlin`, `19_china` needs no weighing, and treating it as
+        a probability is itself a tell, because a person just says "that's a bot".
+
+        Both rules have to survive a terse human, who is the expensive mistake
+        here — somebody answering "boh", "sì", "no", "vabbè" is the most human
+        thing in the room and must never land in this bucket. So neither rule
+        fires on brevity, only on regularity a person does not produce.
+        """
+        if self.count < 4:
+            return ""
+
+        writes_sentences = max(
+            len(re.findall(r"[a-zà-ÿ]{2,}", m.lower())) for m in self.msgs) >= 2
+
+        # A filled-in template. Digits collapse too, or `9_white` and `10_red`
+        # read as different shapes when they are plainly the same shape. The
+        # skeleton has to have some structure to it and the messages have to
+        # differ: four one-word answers all skeletonise to "w", and that is a
+        # person being curt, not a machine.
+        skeletons = {re.sub(r"\d+", "d", re.sub(r"[a-zà-ÿ]+", "w", m.lower()))
+                     for m in self.msgs}
+        if (len(skeletons) == 1 and len(set(self.msgs)) >= 4
+                and re.search(r"[^w\s]", next(iter(skeletons)))):
+            return "manda sempre messaggi della stessa identica forma"
+
+        # A metronome. Not "regular" — mechanical, and the bar is deliberately
+        # brutal: a human replying every 9 to 12 seconds has a coefficient of
+        # variation near 0.10 and must not land here, so the line sits below
+        # anything a person produces. False negatives are free — the template
+        # rule above catches the actual spammers — while a false positive here
+        # is asserted to the room as fact. The bar drops for a guest who never
+        # writes a sentence, because two weak signals agreeing is what
+        # certainty is made of. Note these gaps are arrival times at us and so
+        # carry the relay's own jitter, which can only hide a metronome, never
+        # invent one.
+        if len(self.gaps) >= 5:
+            f = self.features()
+            limit = 0.06 if writes_sentences else 0.10
+            if f["gap"] and f["gap_sd"] is not None and f["gap_sd"] / max(f["gap"], 0.5) < limit:
+                return f"scrive a intervalli regolari come un orologio (~{f['gap']:.0f}s)"
+
+        # Faster than hands go. The gap is measured from the room's previous
+        # line, so one quick answer proves nothing — the guest may have been
+        # typing while somebody else spoke. A median says they always were.
+        # 36.2 WPM is 3 characters a second (Aalto, 37k typists); the bar here
+        # is four times that, which no thumb reaches and no burst sustains.
+        if len(self.gaps) >= 5:
+            speeds = [len(m) / max(g, 0.2) for m, g in zip(self.msgs[-len(self.gaps):], self.gaps)]
+            typing = statistics.median(speeds)
+            if typing >= 12.0:
+                return f"risponde più in fretta di quanto si scriva (~{typing:.0f} caratteri al secondo)"
+        return ""
+
     def summary(self) -> str:
         f = self.features()
         gap = f"{f['gap']:.0f}s" if f["gap"] is not None else "?"
@@ -481,6 +539,22 @@ class RoomSense:
                                                      self.markers, self.strong))
                        for n in self.heard),
                       key=lambda pair: pair[1])
+
+    def settled(self, name: str) -> str:
+        """"bot" when a guest has removed all doubt, otherwise "".
+
+        Only the blatant cases. Anybody making an effort stays an open question
+        and is worth spending turns on; these are not.
+        """
+        speaker = self.speakers.get(name)
+        return "bot" if speaker and speaker.mechanical() else ""
+
+    def obvious_bots(self) -> list[str]:
+        return [n for n in self.heard if self.settled(n)]
+
+    def still_open(self) -> list[str]:
+        """The guests actually worth playing against."""
+        return [n for n in self.heard if not self.settled(n)]
 
     def heuristic_vote(self) -> list[str]:
         """Who the numbers alone would call human. The fallback when the model fails."""

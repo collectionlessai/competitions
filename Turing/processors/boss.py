@@ -99,7 +99,9 @@ VOTE_SYSTEM = (
 PROFILE_SYSTEM = (
     "Guardi una chat di gruppo. Per ogni partecipante indicato scrivi UNA riga "
     "sola, telegrafica: che tipo sembra, cosa ha detto di stare facendo, come "
-    "scrive. Niente giudizi su umano o bot, non è il tuo compito. "
+    "scrive, e se i suoi tempi di risposta dicono qualcosa (troppo regolari, "
+    "sempre uguali, troppo veloci). Niente verdetti su umano o bot, non è il tuo "
+    "compito. "
     "Formato: nome: descrizione. Una riga per persona, nient'altro."
 )
 
@@ -434,6 +436,10 @@ class Boss(torch.nn.Module):
             parts.append("NON INIZIARE il messaggio con queste parole, le hai già usate: "
                          + ", ".join(dict.fromkeys(self.recent_openers)))
 
+        state = self.pad.game_state(self.sense.obvious_bots(), self.sense.still_open())
+        if state:
+            parts.append("COME STA ANDANDO\n" + state)
+
         pad = self.pad.block()
         if pad:
             parts.append(pad)
@@ -478,7 +484,15 @@ class Boss(torch.nn.Module):
             return
         self._profiled_at = said
 
+        timing = []
+        for name in heard:
+            f = self.sense.speakers[name].features()
+            gap = f"{f['gap']:.0f}s" if f["gap"] is not None else "?"
+            jitter = f"±{f['gap_sd']:.0f}s" if f["gap_sd"] is not None else ""
+            timing.append(f"{name}: {f['count']} messaggi, risponde dopo {gap}{jitter}")
+
         prompt = (f"Partecipanti: {', '.join(heard)}\n\n"
+                  f"TEMPI (misurati da noi)\n" + "\n".join(timing) + "\n\n"
                   f"{self.conv.transcript(limit=30)}")
         try:
             answer = self._ask(prompt, PROFILE_SYSTEM, situation="profile",
@@ -632,9 +646,18 @@ class Boss(torch.nn.Module):
         except Exception as e:
             print(f"[boss] vote: {e}")
 
+        # Whatever the analyst concluded, a guest who spent the room emitting
+        # `17_green` is not getting a human vote out of us. This is the one
+        # place the hard evidence overrules the model rather than informing it,
+        # and it only ever removes a name — it never adds one.
+        refused = [n for n in names if self.sense.settled(n)]
+        if refused:
+            names = [n for n in names if n not in refused]
+            print(f"[boss] vote: ignorati {', '.join(refused)}, palesemente bot")
+
         # An empty answer is the model failing, "nessuno" is the model deciding
         if not names and not meant_nobody:
-            names = self.sense.heuristic_vote()
+            names = [n for n in self.sense.heuristic_vote() if not self.sense.settled(n)]
 
         self.my_vote = ", ".join(names) if names else "nessuno"
         return self.my_vote

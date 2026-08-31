@@ -113,6 +113,26 @@ class Pad:
 
     # -- what goes into the prompt ----------------------------------------
 
+    def game_state(self, settled: list, open_names: list) -> str:
+        """Where the game stands and what there is left to do about it.
+
+        Without this the actor treats every guest as an equally open question
+        for the whole room, which is both a waste of turns and, when one of them
+        is plainly a spammer, visibly odd.
+        """
+        lines = []
+        if settled:
+            lines.append(f"Su {', '.join(settled)} non c'è più niente da capire: sono bot, "
+                         "punto. Non discuterne come se fosse un'ipotesi, non stargli dietro, "
+                         "al massimo una battuta e via.")
+        if open_names:
+            lines.append(f"Quelli su cui non hai ancora capito: {', '.join(open_names)}. "
+                         "È lì che vale la pena spendere i messaggi: falli parlare di oggi, "
+                         "di qui, di una cosa che uno che c'era saprebbe.")
+        elif settled:
+            lines.append("Non è rimasto nessuno di interessante: puoi anche startene zitto.")
+        return "\n".join(lines)
+
     def block(self) -> str:
         """The notepad as the model should see it, or "" when there is nothing.
 

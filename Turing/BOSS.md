@@ -58,6 +58,27 @@ doubt, making a typo — on a random walk with momentum, so the log comes out in
 bursts and lulls instead of a flat line. Answering every announcement is the
 single most recognisable thing an agent does, so most of them get nothing.
 
+**Certainty is not a probability.** `bot_score` shades every guest, which is
+right for guests who are trying and wrong for a guest emitting `17_green`,
+`18_berlin`, `19_china`. Hedging about that one is itself a tell: a person just
+says "that's a bot" and stops thinking about it. `Speaker.mechanical()` is a
+separate, much harder test — a filled-in template, a metronome, or a typing
+speed no hands reach — and what it returns is treated as fact. The room's
+settled bots get named once and then dropped, the turns go to whoever is still
+a question, and no settled bot can be voted human whatever the analyst decided.
+The bar is set by the false positive, not the false negative: the template rule
+carries the real spammers, so the two clock rules sit below anything a person
+produces (a human answering every 9–12 seconds has a coefficient of variation
+near 0.10, so the line is 0.06). Curt is not mechanical — four one-word answers
+are the most human thing in the room.
+
+**The actor knows what it wants.** The prompt carries a `COME STA ANDANDO`
+block: who is settled, who is open, and therefore what this turn is for. Without
+it the model treats a spammer and a stranger as equally open questions for the
+whole room, spends its turns evenly, and reads as something with no stake in the
+outcome. With it, there is a case where the right move is to say nothing —
+everyone interesting is already identified.
+
 **The vote is played to win.** F1 is scored, so the vote is genuine: a separate
 prompt with no persona in it, over the transcript plus per-speaker statistics —
 how fast each guest replied, how evenly, how uniform their message lengths, how

@@ -153,6 +153,7 @@ class Director:
         self.energy = self.mean_energy
         self.said = 0
         self.last_styles: list[str] = []
+        self.called_out: set[str] = set()   # said out loud, no need to repeat
         self.fishing_seen = 0     # escalates: firm, then reported
 
     def _walk(self) -> None:
@@ -187,12 +188,19 @@ class Director:
         # Once there is evidence, use it. Calling out a guest who is plainly a
         # model is both the human move and the one that sets up the vote;
         # siding with one who is plainly not is the other half of the same play
+        # A guest who has removed all doubt gets said out loud once, early, and
+        # then dropped. Saying it is the human move; saying it again every turn
+        # is not, and the turns are better spent on whoever is still a question.
+        obvious = [n for n in sense.obvious_bots() if n not in self.called_out]
+        if obvious:
+            pool["smaschera"] = 3.2
+
         ranked = sense.ranked()
         if ranked and sense.elapsed > 60.0:
             most_human, best = ranked[0]
             worst_name, worst = ranked[-1]
             if worst >= 0.75 and sense.speakers[worst_name].count >= 3:
-                pool["smaschera"] = 2.4
+                pool["smaschera"] = max(pool.get("smaschera", 0.0), 2.4)
             elif worst >= 0.6 and sense.elapsed > self.accuse_after:
                 pool["accusa"] = 1.2
             if best <= 0.3 and len(ranked) > 1 and sense.speakers[most_human].count >= 3:
@@ -312,8 +320,15 @@ class Director:
 
         nudge = STYLES.get(style, "")
         if "{chi}" in nudge:
-            suspects = [n for n, _ in reversed(sense.ranked())] or sense.others
-            nudge = nudge.format(chi=suspects[0]) if suspects else STYLES["dubbio"]
+            # Name a settled bot first when one is waiting to be named, so the
+            # call-out lands on the guest there is nothing left to weigh about
+            unsaid = [n for n in sense.obvious_bots() if n not in self.called_out]
+            suspects = unsaid or [n for n, _ in reversed(sense.ranked())] or sense.others
+            if suspects:
+                nudge = nudge.format(chi=suspects[0])
+                self.called_out.add(suspects[0])
+            else:
+                nudge = STYLES["dubbio"]
         if probe:
             nudge = (nudge + ". " if nudge else "") + PROBE_NUDGE[probe]
 
