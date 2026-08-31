@@ -34,6 +34,7 @@ from utils import Conversation
 from processors.context import Context
 from processors.room import RoomSense
 from processors.director import Director
+from processors.pad import Pad
 from processors import humanise
 
 # The world logs the manager's status messages and nothing else, so a room can
@@ -249,6 +250,7 @@ class Boss(torch.nn.Module):
         self.context = Context()          # the conference, sliced by the clock
         self.sense = RoomSense(markers=self.context.markers(),
                                strong=self.context.note_markers())
+        self.pad = Pad()                  # what we are holding in mind
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
@@ -326,6 +328,7 @@ class Boss(torch.nn.Module):
         (self.typing_cps, self.typo_chance,
          self.correct_chance, self.device_pref) = read_style(self.persona)
         self.conv.reset()
+        self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
         self.my_vote = None
@@ -392,10 +395,39 @@ class Boss(torch.nn.Module):
             parts.append("NON INIZIARE il messaggio con queste parole, le hai già usate: "
                          + ", ".join(dict.fromkeys(self.recent_openers)))
 
+        pad = self.pad.block()
+        if pad:
+            parts.append(pad)
+
         if beat.nudge:
             parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
         parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
         return "\n\n".join(parts)
+
+    # Something proposed rather than merely said. Kept loose on purpose: it is
+    # matched against our OWN line, which the persona wrote, so it has to catch
+    # "ho un'idea", "proviamo", "facciamo una cosa" without listing them all.
+    PROPOSAL = re.compile(r"\b(?:ho un(?:')?idea|propong|proviamo|facciamo|"
+                          r"secondo me dovremmo|senti(?:te)? qua|"
+                          r"vi va se|scommetto)", re.IGNORECASE)
+    # Something asserted about ourselves that we must not contradict later
+    ABOUT_ME = re.compile(r"\b(?:io )?(?:sono|faccio|lavoro|vengo|abito|studio|"
+                          r"stamattina ho|ieri ho|oggi ho|ho appena)\b", re.IGNORECASE)
+
+    def _note_pad(self, reply: str, beat) -> None:
+        """Write down what this line commits us to."""
+        if self.PROPOSAL.search(reply):
+            self.pad.add("plan", reply, ttl=100.0)
+        elif self.ABOUT_ME.search(reply) and len(reply.split()) >= 4:
+            self.pad.add("claim", reply, ttl=240.0)
+
+        # A verdict we voiced about somebody is one we should hold to
+        if beat.style in ("smaschera", "accusa") and self.sense.heard:
+            worst = self.sense.ranked()[-1][0]
+            self.pad.add("read", "secondo te è un bot", about=worst, ttl=180.0)
+        elif beat.style == "allea" and self.sense.heard:
+            best = self.sense.ranked()[0][0]
+            self.pad.add("read", "ti sembra una persona vera", about=best, ttl=180.0)
 
     def _note_pace(self, chars: int) -> None:
         """Blend this turn into the averages the timing filter budgets from."""
@@ -592,6 +624,7 @@ class Boss(torch.nn.Module):
         self.conv.remember(reply)
         self._note_opener(reply)
         self._note_pace(len(reply))
+        self._note_pad(reply, beat)
         self.sense.i_spoke()
         self.director.spoke()
         self.last_spoke_at = self.sense.elapsed
