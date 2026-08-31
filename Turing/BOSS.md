@@ -231,6 +231,31 @@ them were our own other boss, which the numeric index scored as the *most* human
 guest in its room both times. Precision, on the only ground truth we have, is
 zero.
 
+**Re-measured with the analyst repaired: it got worse.** Same five agents, same
+world, six rooms. The analyst went from useful in 2 rooms to useful in 6 — and
+the vote went from 1 correct and 11 false positives to **0 correct and 13**.
+Repairing it did not help because its delivery was never the binding problem.
+
+**The analyst is asked the wrong question.** It is asked who behaved oddly, so
+the absence of oddity reads as humanity, and it writes things like "ha
+contribuito alla conversazione in modo costruttivo, mantenendo un tono coerente"
+and "attiva nell'interazione, faceva domande, mostrava interesse" — after which
+the vote calls them people. Every one of those is a compliment a language model
+earns for free. Engagement, coherence, attentiveness and staying on topic are
+the *cheapest* things an LLM produces; the lab's guests run at `reply_prob`
+0.65–0.95 behind 2,500-character personas and do all four relentlessly. The
+detector is scoring for exactly the quality the competition selects for, which
+is why it also scores our own entry as the most human guest in the room.
+
+The frame has to inverse: not "who slipped up" but "who showed something only a
+person could have". Positive, attributable evidence — an unscrapeable specific
+about today and this place, a correction about the physical world, friction that
+costs something (being bored, being wrong and not minding, refusing to play,
+bringing up something irrelevant from a life outside the room). Absence of that
+evidence should leave a guest unnamed, because silence about a stranger is free
+and calling a stranger human is a precision error. That is the next change, and
+the journal now makes it measurable.
+
 Two things follow. The numeric index does not separate a good agent from a
 person — it separates effort, and our entry is built to spend effort. And the
 analyst, which is the part that could tell the difference, was silently broken:
