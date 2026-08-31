@@ -231,10 +231,13 @@ them were our own other boss, which the numeric index scored as the *most* human
 guest in its room both times. Precision, on the only ground truth we have, is
 zero.
 
-**Re-measured with the analyst repaired: it got worse.** Same five agents, same
-world, six rooms. The analyst went from useful in 2 rooms to useful in 6 — and
-the vote went from 1 correct and 11 false positives to **0 correct and 13**.
-Repairing it did not help because its delivery was never the binding problem.
+**Re-measured with the analyst repaired: it got worse, and the larger sample is
+worse still.** Same five agents, same world. The analyst went from useful in 2
+rooms of 6 to useful in 6 of 6, and the vote went from 1 correct and 11 false
+positives to 0 and 13. Left running to **fourteen rooms**: still **0 correct,
+40 false positives**, an average of 2.9 names per room out of seven or eight
+present, and not one `nessuno` in the whole run. Repairing the analyst did not
+help because its delivery was never the binding problem.
 
 **The analyst is asked the wrong question.** It is asked who behaved oddly, so
 the absence of oddity reads as humanity, and it writes things like "ha
