@@ -375,11 +375,20 @@ class Boss(torch.nn.Module):
         was spent too.
         """
         start = time.monotonic()
+        answer = ""
         try:
-            return self._backend()(prompt, system_prompt=system_prompt,
-                                   situation=situation, **overrides)
+            answer = self._backend()(prompt, system_prompt=system_prompt,
+                                     situation=situation, **overrides)
+            return answer
         finally:
             self.last_call_seconds += time.monotonic() - start
+            # Both halves of every call, verbatim. The journal recorded what the
+            # agent decided and not what it was asked, which is the half you
+            # need when a decision looks wrong: a vote that names a bot is not
+            # explicable from the vote alone.
+            self._journal("call", situation=situation, system=system_prompt,
+                          prompt=prompt, answer=answer,
+                          seconds=round(time.monotonic() - start, 1))
 
     # -- a new room -------------------------------------------------------
 
