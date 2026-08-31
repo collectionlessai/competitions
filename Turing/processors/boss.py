@@ -57,25 +57,33 @@ VOTE_SYSTEM = (
     "NON dare per scontato che ci sia almeno uno per parte: può essere stata una stanza di "
     "sole persone, o di soli bot. Decidi caso per caso, non a quote.\n"
     "\n"
-    "La cosa che separa davvero è il CONTESTO. Chi era davvero lì lascia cadere cose "
-    "concrete di questo posto e di queste ore senza doverci pensare: la coda ai badge, il "
-    "caffè della pausa, un talk noioso, il caldo, l'arancina, un nome di via. Chi non c'è "
-    "parla della propria giornata in astratto, resta sul generico, e se lo incalzi su un "
-    "dettaglio scivola o cambia discorso. Guarda soprattutto questo.\n"
+    "COME PESARE LE COSE, in ordine di forza.\n"
     "\n"
-    "Altri segni di modello: risponde a tutti e a tutto, non ignora mai niente, non ha "
-    "opinioni scomode, resta educato anche sotto provocazione, non fa mai domande, non "
-    "sbaglia mai a scrivere, ripete la stessa apertura, scrive messaggi tutti della stessa "
-    "lunghezza.\n"
-    "Segni di persona: tempi irregolari, messaggi cortissimi, errori, cambi di discorso, "
+    "1. Come reagisce a un'idea altrui. È il segno più forte che hai. Quando qualcuno "
+    "propone uno scherzo, una tattica, una prova per stanare i bot, una persona ci sta: "
+    "ci ride sopra, la migliora, la critica, la rilancia, oppure difende la propria quando "
+    "gliela smontano. Un modello, se nessuno gliel'ha detto di farlo, risponde educatamente "
+    "e passa oltre, o non capisce che era un gioco. Costruire INSIEME è difficile da "
+    "fingere; rispondere non lo è.\n"
+    "\n"
+    "2. Il contesto, ma in modo asimmetrico. Chi lascia cadere una cosa concreta di qui e "
+    "di adesso — la coda ai badge, un talk noioso, il caldo, un nome di via — molto "
+    "probabilmente c'era. Il contrario NON vale: uno che non dice niente di locale può "
+    "benissimo essere una persona che ha saltato la mattina o che non ha voglia di "
+    "parlarne. Sapere pesa; non sapere quasi niente.\n"
+    "\n"
+    "3. Il resto: risponde a tutti e a tutto, non ignora mai niente, non ha opinioni "
+    "scomode, resta educato anche sotto provocazione, non fa mai domande, non sbaglia mai "
+    "a scrivere, ripete la stessa apertura, messaggi tutti uguali di lunghezza.\n"
+    "Di persona: tempi irregolari, messaggi cortissimi, errori, cambi di discorso, "
     "insofferenza, silenzi, e il gusto di mettere in mezzo gli altri.\n"
     "\n"
-    "I numeri che ti do sono un indizio, non una sentenza: se la trascrizione dice il "
-    "contrario, fidati della trascrizione.\n"
+    "I numeri che ti do sono un indizio debole. Se la trascrizione dice il contrario, "
+    "fidati della trascrizione.\n"
     "\n"
-    "Sbagliare costa in due modi: chi nomini per sbaglio e chi ti lasci sfuggire pesano "
-    "uguale. Quindi non nominarli tutti per sicurezza e non startene zitto per prudenza: "
-    "nomina quelli su cui ci metteresti davvero la mano sul fuoco.\n"
+    "Sbagliare costa in due modi uguali: chi nomini per sbaglio e chi ti lasci sfuggire. "
+    "Quindi non nominarli tutti per sicurezza e non startene zitto per prudenza. Nomina "
+    "SOLO quelli su cui ci scommetteresti: se sei davvero in dubbio su uno, lascialo fuori.\n"
     "\n"
     "Ragiona in due righe al massimo, poi chiudi con una riga esattamente così:\n"
     "VOTO: nome, nome\n"
@@ -162,12 +170,33 @@ def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]
     return "\n".join(lines), found
 
 
+STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)")
+
+# What a persona writes like when its block does not say. The population mean
+# from the Aalto mobile-typing study (36.2 WPM = 3.0 cps at five characters a
+# word), a visible-typo rate discounted well below the 2.3% per-character figure
+# those transcription studies report, and a modest chance of bothering to send
+# the "*parola" afterwards.
+DEFAULT_STYLE = (3.0, 0.12, 0.25)
+
+
+def read_style(block: str) -> tuple:
+    """`(cps, typo_chance, correction_chance)` for one persona."""
+    found = STYLE_LINE.search(block)
+    if not found:
+        return DEFAULT_STYLE
+    return (float(found.group(1)), float(found.group(2)), float(found.group(3)))
+
+
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
     """The preamble and the people, out of one file. Blocks are split on `---`."""
     with open(path, encoding="utf-8") as handle:
         raw = handle.read()
 
-    kept = "\n".join(line for line in raw.splitlines() if not line.startswith("#"))
+    # The STILE comment is kept while splitting so each block can be read for
+    # its numbers, then dropped so it never reaches the model
+    kept = "\n".join(line for line in raw.splitlines()
+                     if not line.startswith("#") or "STILE:" in line)
     blocks = [block.strip() for block in kept.split("\n---") if block.strip()]
     if not blocks:
         raise ValueError(f"no persona found in {path}")
@@ -210,6 +239,7 @@ class Boss(torch.nn.Module):
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
+        self.typing_cps, self.typo_chance, self.correct_chance = read_style(self.persona)
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
@@ -277,6 +307,9 @@ class Boss(torch.nn.Module):
         """
         choices = [p for p in self.personas if p != self.persona] or self.personas
         self.persona = random.choice(choices)
+        # The writing style travels with the person, so there is no single
+        # "this agent's grafia" to learn across rooms
+        self.typing_cps, self.typo_chance, self.correct_chance = read_style(self.persona)
         self.conv.reset()
         self.director.new_room()
         self.pending_correction = ""
@@ -297,7 +330,7 @@ class Boss(torch.nn.Module):
         director's line last, right up against the reply: an instruction buried
         above a page of conversation is one the model has already forgotten.
         """
-        parts = [self.persona]
+        parts = [STYLE_LINE.sub("", self.persona).replace("# ", "").strip()]
 
         parts.append(self.context.block())
 
@@ -393,9 +426,9 @@ class Boss(torch.nn.Module):
         reply = humanise.cap_words(reply, beat.max_words)
         reply = humanise.chat_case(reply, lower_chance=beat.lower_chance)
 
-        if random.random() < beat.typo_chance:
+        if random.random() < min(beat.typo_chance * 2.0, self.typo_chance):
             reply, correct = humanise.add_typo(reply)
-            if correct and random.random() < 0.3:
+            if correct and random.random() < self.correct_chance:
                 self.pending_correction = correct
 
         return humanise.safe(reply)

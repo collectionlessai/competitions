@@ -48,11 +48,12 @@ import random
 VOTING = "can_vote"
 CHATTING = "room_round_table"
 
-# Characters per second at a phone keyboard. Mobile text entry studies put the
-# average adult near 36 wpm and practised thumbs past 60; at ~5 characters a
-# word that is 3 to 5 cps. The default sits at the quick end, because a guest
-# who takes 30 seconds over one line stops being able to hold a conversation.
-TYPING_CPS = 4.5
+# Characters per second at a phone keyboard, used only when the processor does
+# not say. The Aalto study of 37,000 people puts the mean at 36.2 WPM, which at
+# five characters a word is 3.0 cps — the 4.5 that used to be here was 54 WPM,
+# a number I had invented and well above the population mean. Each persona
+# carries its own rate; the filter reads it off the processor.
+TYPING_CPS = 3.0
 
 # Reading. Silent reading runs 200-300 wpm, so ~20 cps, and nobody reads a chat
 # message as carefully as a page.
@@ -176,7 +177,8 @@ class BossTiming:
             # the length comes from our own recent ones; the model's time comes
             # off the same way, and comes out of the budget rather than adding
             # to it. Floors keep a silent turn from waiting for nothing.
-            typing = expected(opts, "mean_reply_chars", 40.0) / self.typing_cps
+            cps = expected(opts, "typing_cps", self.typing_cps)
+            typing = expected(opts, "mean_reply_chars", 40.0) / cps
             generating = expected(opts, "mean_call_seconds", 2.0)
             delay += max(0.0, typing - generating)
 
