@@ -304,6 +304,11 @@ class Boss(torch.nn.Module):
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
+        self.entry_line = ""                      # a hello, written before the room started
+        self.entry_at = 0.0                       # and when it is due
+        self.last_greeted = -99.0                 # so hellos are not traded all night
+        self.entries = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "ENTRATA")
+        self.hellos = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "SALUTO")
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
         self._profiled_at = 0                     # messages seen at last profiling
@@ -381,6 +386,24 @@ class Boss(torch.nn.Module):
         self.my_vote = None
         self.recent_openers = []
         self.recent_mine = []
+
+        # Say hello without asking anybody's permission. The room is at its
+        # emptiest in the first seconds, which is exactly when a model-backed
+        # guest is slowest: cold gateway, a long briefing to read, and a typing
+        # charge computed for an average-length sentence. Measured, that put the
+        # first word about eighteen seconds after the door opened, and a person
+        # who walks in and says nothing for eighteen seconds has already
+        # answered the question the room is there to ask. So the greeting is
+        # picked here, off a list, and owes the model nothing.
+        #
+        # The spread matters more than the delay. Everyone arriving at 2.0s is
+        # its own signature, so this runs from "before I have even read the
+        # briefing" to "I was doing something else for a bit".
+        self.last_greeted = -99.0
+        self.entry_line = random.choice(self.entries) if self.entries else ""
+        self.entry_at = random.choice([random.uniform(0.8, 4.0),
+                                       random.uniform(4.0, 14.0),
+                                       random.uniform(14.0, 35.0)])
 
         # `sense.elapsed` restarts with the room, so a stale value from the last
         # one reads as "spoke in the future" and damps the whole room
@@ -783,6 +806,42 @@ class Boss(torch.nn.Module):
         if (self.my_vote is not None and turn.kind in ("reminder", "roster", "quiet")
                 and (self.sense.voting or turn.vote_score >= 2)):
             return self.my_vote
+
+        # A hello, if one is due and nothing has been said yet. Before the
+        # director, before the model, before anything that can decline it.
+        if self.entry_line and turn.kind != "vote":
+            if self.sense.elapsed >= self.entry_at:
+                line, self.entry_line = self.entry_line, ""
+                self.conv.remember(line)
+                self.sense.i_spoke()
+                self.director.spoke()
+                self.last_spoke_at = self.sense.elapsed
+                if TRACE:
+                    print(f"[boss->] {line!r}  (entrata, {self.sense.elapsed:.1f}s)", flush=True)
+                return line
+
+        # Somebody said hello. This one is answered by reflex and not by the
+        # model: the point of a greeting is that it comes back straight away,
+        # and anything that has to be generated first cannot.
+        greeted_by = [m.speaker for m in turn.lines
+                      if m.speaker and not m.mine
+                      and not self.sense._is_manager(m.speaker)
+                      and not self.sense.settled(m.speaker)
+                      and humanise.is_greeting(m.text)]
+        if (turn.kind == "chat" and self.hellos and greeted_by
+                and self.sense.elapsed - self.last_greeted > 25.0):
+            self.last_greeted = self.sense.elapsed
+            line = random.choice([h for h in self.hellos if h not in self.recent_mine]
+                                 or self.hellos)
+            self.entry_line = ""          # that was the hello
+            self.conv.remember(line)
+            self.recent_mine = (self.recent_mine + [line])[-3:]
+            self.sense.i_spoke()
+            self.director.spoke()
+            self.last_spoke_at = self.sense.elapsed
+            if TRACE:
+                print(f"[boss->] {line!r}  (saluto)", flush=True)
+            return line
 
         # Owed from last turn: the rest of a message the thumb cut short. This
         # one is not optional — a fragment nobody ever finishes is the bug this

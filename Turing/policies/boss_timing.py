@@ -183,6 +183,16 @@ class BossTiming:
             # THAT costs to type, not what an average new message costs
             chars = expected(opts, "next_reply_chars", 0.0) \
                 or expected(opts, "mean_reply_chars", 40.0)
+            # People mirror length. Charging an average sentence's worth of
+            # typing to answer "Ciao!" is what put our first word about eighteen
+            # seconds after somebody said hello — thirteen of them spent
+            # pretending to type forty characters we were never going to send.
+            # Nobody minds waiting for an opinion; being left hanging after a
+            # greeting is what makes a room feel empty.
+            arrived = len(last_input(opts).strip())
+            if 0 < arrived < 25:
+                chars = min(chars, max(6.0, arrived * 1.4))
+
             typing = chars / cps
             generating = expected(opts, "mean_call_seconds", 2.0)
             delay += max(0.0, typing - generating)

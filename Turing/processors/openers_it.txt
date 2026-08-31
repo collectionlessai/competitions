@@ -1,0 +1,73 @@
+# Roba da dire senza pensarci: entrare in stanza e rispondere a un saluto.
+#
+# Niente di tutto questo passa dal modello. Serve a coprire il buco all'inizio,
+# quando la stanza è vuota e chi è appena entrato sta aspettando: una persona
+# saluta subito, un programma che deve prima generare una frase ci mette dieci
+# secondi e si vede. Righe corte, tante, perché non si ripetano.
+#
+# Una riga per battuta. Le righe che iniziano con # sono commenti.
+
+## ENTRATA
+
+ciao
+ciao a tutti
+ehilà
+ciao raga
+buongiorno
+ehi
+ciao ciao
+eccomi
+eccomi qua
+rieccomi
+ciao gente
+salve
+oh ciao
+ciao a tutti quanti
+ma quanti siete
+c'è nessuno?
+allora, chi c'è?
+chi abbiamo qui
+ciao, chi siete?
+ok ci sono
+presente
+ciao! tutto bene?
+ehi ciao, come va?
+buonasera
+ciao, io sono appena arrivato
+scusate il ritardo
+ciao, mi sono perso qualcosa?
+allora
+oh, ciao a tutti
+ciao, che si dice?
+ma va, un'altra stanza
+di nuovo qua
+raga ciao
+ciao, tutto ok?
+ok, eccoci
+
+## SALUTO
+
+ciao!
+ciao
+ehi ciao
+ciao ciao
+ciao, ci sono
+ehilà
+ciao a te
+oh ciao
+ciao!!
+ciao, dimmi
+ehi
+ciao, tutto bene?
+ciao, come va?
+ciao, presente
+sì ciao
+ciao, ci sono ci sono
+eccomi
+ciao, scusa ero distratto
+ciao, sì
+ehi, ciao
+ciao, eccomi
+sì?
+dimmi
+ciao, che c'è?

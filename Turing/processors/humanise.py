@@ -21,6 +21,7 @@ caller's business — `director.py` sets it per turn.
 
 import os
 import re
+import pathlib
 import random
 
 # Reasoning traces. Some models emit one around the answer, and an agent that
@@ -482,3 +483,36 @@ def repeats_self(text: str, mine, need: int = 2) -> bool:
 
     here = solid(text)
     return any(len(here & solid(old)) >= need for old in mine)
+
+
+GREETING = re.compile(
+    r"^\W*(ciao|salve|ehi|ehila|ehilà|hey|buongiorno|buonasera|"
+    r"raga|ragazzi|oh)[aeiou]*\b|c'?è\s+nessuno|"
+    r"chi\s+(c'?è|siete|abbiamo|ci sta)",
+    re.IGNORECASE)
+
+
+def is_greeting(text: str) -> bool:
+    """Whether this is somebody saying hello rather than saying something.
+
+    Worth its own test because a greeting is the one message whose *latency* is
+    the whole content. Nobody minds waiting twenty seconds for an opinion; being
+    left hanging after "ciao!" reads as nobody being there.
+    """
+    return bool(GREETING.search(text.strip()[:40]))
+
+
+def load_lines(path, section: str) -> list:
+    """The lines under one `## SECTION` heading of a plain list file."""
+    out, live = [], False
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("##"):
+            live = line[2:].strip().upper() == section.upper()
+        elif live and line and not line.startswith("#"):
+            out.append(line)
+    return out

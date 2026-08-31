@@ -271,6 +271,19 @@ class Director:
         alone_with = len(sense.heard) <= 1
         addressed = named or asked or (alone_with and turn.kind == "chat")
 
+        # Who said it matters as much as what was said. A guest we have already
+        # settled saying our name is a spammer hitting a template; anybody else
+        # saying it is a person waiting for an answer.
+        speaker_open = any(m.speaker and not m.mine and m.speaker != manager
+                           and not sense.settled(m.speaker)
+                           and mine and mine in m.text.lower()
+                           for m in turn.lines)
+
+        # Whether anything in this turn came from somebody still worth
+        # answering. When it did not, the turn is spam and deserves nothing.
+        from_open = any(m.speaker and not m.mine and m.speaker != manager
+                        and not sense.settled(m.speaker) for m in turn.lines)
+
         # Announcements and reminders. Somebody walking into a room is not a
         # conversational turn, and the room fires one anyway
         if turn.kind in ("roster", "reminder", "quiet"):
@@ -299,13 +312,17 @@ class Director:
                               "come chi entra in chat e butta lì qualcosa",
                         max_words=8, lower_chance=0.85, emoji_chance=0.1)
 
-        # An ordinary message. Being probed or named pulls you back in
+        # An ordinary message, and then two kinds of adjustment which must not
+        # be confused. Everything in this first group is a *preference* and
+        # multiplies; everything in the second is an *obligation* and floors.
+        # In that order, because the other way round is a bug that shipped: the
+        # flood rule below used to run after the "somebody said your name"
+        # floor and multiplied it away, so in a room where two spammers held 88%
+        # of the traffic a direct greeting had a 39% chance of an answer instead
+        # of 90%. Measured against a live transcript, a person said "Ciao Cal!"
+        # twice and was ignored twice, which is all it takes.
         chance = self.base_chance * (0.55 + 0.75 * self.energy)
-        if addressed or probe:
-            chance = max(chance, 0.9)
-        if asked and alone_with:
-            chance = 1.0        # one other person, and they asked you something
-        elif since_i_spoke < 8.0:
+        if since_i_spoke < 8.0:
             chance *= 0.35          # you just talked, let somebody else go
         elif since_i_spoke > 45.0:
             chance = min(1.0, chance * 1.4)
@@ -319,14 +336,28 @@ class Director:
                 and all(n in self.called_out for n in sense.obvious_bots())):
             chance *= 0.3
 
-        # Shouting over a flood. Once most of what is arriving is spam from
-        # guests we have already settled, a message costs the same and buys
-        # much less: it scrolls away, and whatever comes back is mixed in with
-        # the noise. Proportional rather than a switch, so a room that is merely
-        # busy is untouched and one that is three-quarters junk goes quiet.
+        # A flood is a reason to talk more, not less — but to the people, not
+        # into the noise. The first version damped everything when spam took
+        # over the room, on the theory that a message buys less when it scrolls
+        # away; that is what a queue would think. The second boosted everything,
+        # which answered 88% of all turns and would have put us at the
+        # `reply_prob = 0.91` of the seeded agents we detect *by* that number.
+        # What people actually do is close ranks: ignore the junk entirely and
+        # talk more to whoever is left, because the flood is now the subject.
         noise = sense.noise_share()
-        if noise > 0.5:
-            chance *= 1.0 - 0.6 * min(1.0, (noise - 0.5) / 0.4)
+        if not from_open:
+            chance *= 0.2       # nothing here but spam. scroll past it.
+        elif noise > 0.5:
+            chance = min(1.0, chance * (1.0 + 0.5 * min(1.0, (noise - 0.5) / 0.4)))
+
+        # Obligations. Not preferences — these are the things whose absence is
+        # the tell, so nothing above is allowed to reduce them. All of them
+        # require a real person on the other end: a settled spammer emitting our
+        # name inside `cal 12_york` is a template collision, not an address.
+        if from_open and (addressed or probe):
+            chance = max(chance, 0.9)
+        if speaker_open:
+            chance = 1.0        # somebody who is not a known bot used your name
 
         # The floor: too quiet by now and the room is worth nothing, so take it
         forced = (sense.elapsed > 170.0 and self.said < self.min_msgs)

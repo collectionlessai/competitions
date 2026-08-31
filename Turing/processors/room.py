@@ -478,11 +478,21 @@ class RoomSense:
 
         return Turn(kind, messages, manager_text, top_vote)
 
+    # Below this, two messages did not happen at different times — they were
+    # handed to us in the same batch and unpacked in a loop. The world joins
+    # several events into one sample (``), so this is the common case in a
+    # busy room, and counting it as elapsed time reports a conversation pace of
+    # zero seconds. Live, that made every generation look stale and threw away
+    # a correct call-out.
+    SAME_BATCH = 0.25
+
     def _note_chat(self, speaker: str, text: str) -> None:
         now = time.monotonic()
         gap = now - self.last_line_at if self.last_line_at is not None else None
         self.last_line_at = now
-        if gap is not None and 0.0 < gap < 120.0:
+        if gap is not None and gap < self.SAME_BATCH:
+            gap = None          # arrived together; how fast they typed is unknown
+        elif gap is not None and gap < 120.0:
             self.room_gaps.append(gap)
         if speaker not in self.speakers:
             self.speakers[speaker] = Speaker(speaker)
