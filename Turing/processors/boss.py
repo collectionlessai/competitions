@@ -201,6 +201,7 @@ def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]
 
 
 STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)"
+                        r"(?:\s+early=([\d.]+))?"
                         r"(?:\s+dev=([\w/]+))?")
 
 # What a persona writes like when its block does not say. The population mean
@@ -208,16 +209,16 @@ STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)"
 # word), a visible-typo rate discounted well below the 2.3% per-character figure
 # those transcription studies report, and a modest chance of bothering to send
 # the "*parola" afterwards.
-DEFAULT_STYLE = (3.0, 0.12, 0.25, "phone")
+DEFAULT_STYLE = (3.0, 0.12, 0.25, 0.0, "phone")
 
 
 def read_style(block: str) -> tuple:
-    """`(cps, typo_chance, correction_chance, device)` for one persona."""
+    """`(cps, typo_chance, correction_chance, early_send, device)` for one persona."""
     found = STYLE_LINE.search(block)
     if not found:
         return DEFAULT_STYLE
     return (float(found.group(1)), float(found.group(2)), float(found.group(3)),
-            found.group(4) or "phone")
+            float(found.group(4) or 0.0), found.group(5) or "phone")
 
 
 def device_now(preference: str, in_session: bool) -> str:
@@ -286,8 +287,8 @@ class Boss(torch.nn.Module):
         self.director = director or Director()
 
         self.persona = random.choice(self.personas)
-        (self.typing_cps, self.typo_chance,
-         self.correct_chance, self.device_pref) = read_style(self.persona)
+        (self.typing_cps, self.typo_chance, self.correct_chance,
+         self.early_chance, self.device_pref) = read_style(self.persona)
         self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
         self.pending_tail = ""            # the rest of a message sent too early
         self.next_reply_chars = 0.0       # what the timing filter should budget next
@@ -360,8 +361,8 @@ class Boss(torch.nn.Module):
         self.persona = random.choice(choices)
         # The writing style travels with the person, so there is no single
         # "this agent's grafia" to learn across rooms
-        (self.typing_cps, self.typo_chance,
-         self.correct_chance, self.device_pref) = read_style(self.persona)
+        (self.typing_cps, self.typo_chance, self.correct_chance,
+         self.early_chance, self.device_pref) = read_style(self.persona)
         self.conv.reset()
         self.pad.clear()
         self._profiled_at = 0
@@ -563,10 +564,11 @@ class Boss(torch.nn.Module):
             if correct and random.random() < self.correct_chance:
                 self.pending_correction = correct
 
-        # Occasionally the thumb goes before the sentence does. Rarer on a
-        # keyboard, where you can see the whole line before you commit to it.
-        early = 0.07 if on_phone else 0.03
-        if not self.pending_correction and random.random() < early:
+        # Occasionally the thumb goes before the sentence does — but only for a
+        # persona whose STILE says so, and only on a phone. A tic everybody has
+        # is a tic somebody can learn.
+        early = self.early_chance if on_phone else 0.0
+        if early and not self.pending_correction and random.random() < early:
             reply, tail = humanise.send_too_early(reply)
             if tail:
                 self.pending_tail = tail

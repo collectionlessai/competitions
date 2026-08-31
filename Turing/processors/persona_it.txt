@@ -16,6 +16,9 @@
 #            senza correttore: qui sono ricercatori adulti con l'autocorrect,
 #            quindi molto meno.
 #   corr     probabilità, DATO un errore, di mandare dopo la correzione "*parola"
+#   early    probabilità di mandare il messaggio un attimo prima di aver
+#            finito, e poi mandare il pezzo che manca. Non è di tutti:
+#            è un tic di chi scrive di fretta col pollice. Assente = 0.
 #   dev      con cosa scrive: pc, phone, oppure una coppia "in-sessione/fuori"
 #            come pc/phone o phone/pc — perché non c'è una regola: c'è chi in
 #            sessione tiene il portatile aperto e la sera scrive dal letto, e
@@ -110,7 +113,7 @@ figli a casa col padre e ogni tanto controlli il telefono per quello. Cammini
 tantissimo, hai già fatto mezza Palermo a piedi.
 
 ---
-# STILE: cps=4.1 typo=0.20 corr=0.20 dev=phone
+# STILE: cps=4.1 typo=0.20 corr=0.20 early=0.07 dev=phone
 CHI SEI
 Hai 24 anni, sei alla prima conferenza in vita tua, magistrale a Pisa. Sei un po'
 spaesato e lo ammetti volentieri, ti sembrano tutti bravissimi. Abbrevi tutto e

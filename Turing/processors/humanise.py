@@ -290,23 +290,33 @@ def add_typo(text: str) -> tuple[str, str]:
 
 
 def send_too_early(text: str) -> tuple:
-    """Split a message the way a thumb that hit send does.
+    """Clip the tail end of a message, the way a thumb that hit send does.
 
-    Returns `(what went out, what still has to)`, or `(text, "")` when the
-    message is too short to break sensibly.
+    Returns `(what went out, what still has to)`.
 
-    The break sits late — around three quarters through — because that is when
-    it happens: you are nearly done, the thought is finished in your head, and
-    the thumb moves before the sentence does. It is NOT the same thing as the
-    length-budget truncation this file used to do, and the difference is the
-    whole point: the remainder is not discarded, it is owed. The caller must
-    send it, or this is just the old amputation bug wearing a costume.
+    Deliberately small. The first version of this cut anywhere from 60% of the
+    message onwards, which is not a slip — it is the length-budget amputation
+    this file exists to prevent, wearing better manners. What actually happens
+    is that you lose the last word, or the back half of it: the message is still
+    readable, it just stops a beat early.
+
+    That size also keeps the recovery automatic. A person who loses half a
+    sentence retypes it, which would mean another model call and a five-second
+    pause; a person who loses one word just sends the word.
     """
     words = text.split()
-    if len(words) < 6:
+    if len(words) < 5:
         return text, ""
-    cut = random.randint(max(3, int(len(words) * 0.6)), len(words) - 2)
-    return " ".join(words[:cut]), " ".join(words[cut:])
+
+    if random.random() < 0.5 and len(words[-1]) >= 5:
+        # mid-word: "...una perdita di tem"  ->  "po"
+        last = words[-1]
+        keep = random.randint(2, len(last) - 2)
+        return " ".join(words[:-1] + [last[:keep]]), last[keep:]
+
+    # or simply the last word, occasionally the last two
+    drop = 1 if random.random() < 0.75 else 2
+    return " ".join(words[:-drop]), " ".join(words[-drop:])
 
 
 def is_assistant(text: str) -> bool:
