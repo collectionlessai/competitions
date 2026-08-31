@@ -42,10 +42,16 @@ from policies.boss_timing import BossTiming
 # account, so this one gets reused between runs rather than invented again.
 NODE_NAME = "TuringBoss"
 
-# A bare name is looked up among your own nodes first, so the organisers' hotel
-# needs their handle in front of it. A copy you run yourself is just its name:
-# swap in "MyTuringHotel" to play against the local world in unaiverse-examples.
-WORLD = os.environ.get("BOSS_WORLD", "stefano.melacci@unisi.it/TuringHotelItaly")
+# The competition hotel, reached by its bare name — verified by joining it
+# (role ID 9). The kit README's `stefano.melacci@unisi.it/...` form is stale:
+# `owner_handle()` in the SDK says an e-mail "is not an identifier anymore", and
+# no prefix is needed anyway once you do not own a world of the same name.
+#
+# Which is the trap worth knowing about: a bare name resolves against YOUR nodes
+# first, so a local copy called `TuringHotelItaly` silently swallows this and you
+# test against yourself while believing you are in the competition. Ours is
+# deliberately called `TuringPlayground` for that reason.
+WORLD = os.environ.get("BOSS_WORLD", "TuringHotelItaly")
 
 # The model behind the persona, chosen by `python -m bench.run_bench
 # --always-speak` over the seven rooms in `bench/probes.py`. Qwen2.5-72B won on
