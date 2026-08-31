@@ -56,6 +56,20 @@ DROPPED = ("aspe", "scusate un attimo", "mi si è impallato tutto", "eh scusa ch
 # is also the point below which naming somebody is all cost and no reward.
 MIN_MSGS_TO_JUDGE = 3
 
+
+def only_names(text: str, names) -> bool:
+    """Whether an answer is nothing but the roster handed back.
+
+    This failure does not look like a failure downstream: the vote prompt gets a
+    section headed COME SI SONO RELAZIONATI containing a list of the very people
+    it was supposed to say something about.
+    """
+    words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]+", text or "") if len(w) > 1]
+    if not words:
+        return True
+    known = {n.lower() for n in names}
+    return sum(1 for w in words if w.lower() not in known) <= 1
+
 # A directory to write the room journal into, or "" for off. Debug instrument.
 JOURNAL = os.environ.get("BOSS_JOURNAL", "")
 
@@ -128,7 +142,8 @@ INTERACTION_SYSTEM = (
     "argomento senza motivo?\n"
     "Essere scontrosi o polemici NON è sospetto: lo è esserlo a sproposito.\n"
     "NON dire chi è umano e chi no. Solo i fatti dell'interazione. "
-    "Una riga per persona."
+    "NON ricopiare l'elenco dei partecipanti: comincia direttamente dalla prima "
+    "riga di analisi, nel formato 'Nome: cosa ha fatto'. Una riga per persona."
 )
 
 
@@ -740,11 +755,25 @@ class Boss(torch.nn.Module):
         # the first one is deliberately not allowed to name anybody: separating
         # "what occurred" from "who was a machine" keeps the second question
         # honest instead of letting it rationalise a hunch.
+        # Four analyst calls in six came back as nothing but the roster echoed
+        # straight back — `Ada, Rye, Mae, Zac`, with no analysis under it. The
+        # prompt leads with "Partecipanti da analizzare: ..." and the model
+        # finishes that sentence instead of starting its own. A second ask costs
+        # one call inside a window we are using seconds of, and an answer that is
+        # only names is worse than none: it feeds the vote a section heading with
+        # nothing underneath it, which reads as "nothing was found".
         interactions = ""
         try:
-            interactions = self._ask(f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
-                                     f"{transcript}", INTERACTION_SYSTEM,
-                                     situation="vote", max_tokens=200, temperature=0.3)
+            ask = (f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
+                   f"{transcript}")
+            interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                     max_tokens=200, temperature=0.3)
+            if only_names(interactions, candidates):
+                interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                         max_tokens=200, temperature=0.6)
+            if only_names(interactions, candidates):
+                print("[boss] l'analista ha reso solo l'elenco, lo ignoro")
+                interactions = ""
             self._journal("analyst", text=interactions)
             if TRACE:
                 print(f"[boss~interactions] {interactions[:300]}", flush=True)
