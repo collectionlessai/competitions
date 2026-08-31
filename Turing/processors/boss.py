@@ -92,6 +92,35 @@ VOTE_SYSTEM = (
 )
 
 
+# The actor's read of the room. Cheap, short, and about socialising rather than
+# judging: what this person seems to be and how they write, so the next line to
+# them can land. Whether they are a machine is a different question, asked at
+# the end, by somebody else, from scratch.
+PROFILE_SYSTEM = (
+    "Guardi una chat di gruppo. Per ogni partecipante indicato scrivi UNA riga "
+    "sola, telegrafica: che tipo sembra, cosa ha detto di stare facendo, come "
+    "scrive. Niente giudizi su umano o bot, non è il tuo compito. "
+    "Formato: nome: descrizione. Una riga per persona, nient'altro."
+)
+
+# The judge's pre-pass. Deliberately separate from the verdict: first work out
+# what happened between people, then decide. And deliberately blind to us — we
+# already know what we are, so our own lines are the instrument, not evidence.
+INTERACTION_SYSTEM = (
+    "Ti do la trascrizione di una chat di gruppo. Analizza SOLO come i "
+    "partecipanti si sono relazionati fra loro e con 'io'.\n"
+    "Per ciascuno, una riga: raccoglieva quello che dicevano gli altri o "
+    "rispondeva e basta? Ha mai proposto o cambiato qualcosa, o è sempre "
+    "stato reattivo? Le sue prese di posizione — d'accordo, contro, sfottò — "
+    "avevano senso rispetto a quello che era appena successo, o arrivavano da "
+    "nessuna parte? Ha ignorato messaggi diretti a lui? Ha cambiato tono o "
+    "argomento senza motivo?\n"
+    "Essere scontrosi o polemici NON è sospetto: lo è esserlo a sproposito.\n"
+    "NON dire chi è umano e chi no. Solo i fatti dell'interazione. "
+    "Una riga per persona."
+)
+
+
 # Two worlds send the same events batched two different ways, and `Conversation`
 # understands one of them: one event per line.
 #
@@ -172,7 +201,7 @@ def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]
 
 
 STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)"
-                        r"(?:\s+dev=(\w+))?")
+                        r"(?:\s+dev=([\w/]+))?")
 
 # What a persona writes like when its block does not say. The population mean
 # from the Aalto mobile-typing study (36.2 WPM = 3.0 cps at five characters a
@@ -194,12 +223,15 @@ def read_style(block: str) -> tuple:
 def device_now(preference: str, in_session: bool) -> str:
     """Which one they are actually holding.
 
-    Somebody who brought a laptop uses it in the sessions and the phone in the
-    evening; somebody who never brings one is on the phone throughout.
+    `pc` or `phone` means always that one. `a/b` means a during sessions and b
+    outside them — and which way round is the persona's business, not a rule:
+    one person keeps the laptop open in talks and writes from bed at night, the
+    next takes notes on paper and only opens it back at the hotel.
     """
-    if preference in ("pc", "phone"):
-        return preference
-    return "pc" if in_session else "phone"
+    if "/" in preference:
+        during, _, outside = preference.partition("/")
+        return during if in_session else outside
+    return preference if preference in ("pc", "phone") else "phone"
 
 
 def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
@@ -263,6 +295,7 @@ class Boss(torch.nn.Module):
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
+        self._profiled_at = 0                     # messages seen at last profiling
 
         # Running averages the timing filter reads back through
         # `opts["agent"].proc.module`. It has to budget for typing before the
@@ -329,6 +362,7 @@ class Boss(torch.nn.Module):
          self.correct_chance, self.device_pref) = read_style(self.persona)
         self.conv.reset()
         self.pad.clear()
+        self._profiled_at = 0
         self.director.new_room()
         self.pending_correction = ""
         self.my_vote = None
@@ -429,6 +463,33 @@ class Boss(torch.nn.Module):
             best = self.sense.ranked()[0][0]
             self.pad.add("read", "ti sembra una persona vera", about=best, ttl=180.0)
 
+    def _maybe_profile(self) -> None:
+        """Update what we make of the room, on a turn we are sitting out."""
+        heard = [n for n in self.sense.heard if self.sense.speakers[n].count >= 2]
+        if not heard:
+            return
+        said = sum(self.sense.speakers[n].count for n in heard)
+        if said - self._profiled_at < 4:      # nothing much new since last time
+            return
+        self._profiled_at = said
+
+        prompt = (f"Partecipanti: {', '.join(heard)}\n\n"
+                  f"{self.conv.transcript(limit=30)}")
+        try:
+            answer = self._ask(prompt, PROFILE_SYSTEM, situation="profile",
+                               max_tokens=90, temperature=0.4)
+        except Exception as e:
+            print(f"[boss] profile: {e}")
+            return
+
+        for line in answer.splitlines():
+            name, _, text = line.partition(":")
+            name, text = name.strip(" -*"), text.strip()
+            if text and name in heard:
+                self.pad.profile(name, text[:90])
+        if TRACE and self.pad.profiles:
+            print(f"[boss~read] {self.pad.profiles}", flush=True)
+
     def _note_pace(self, chars: int) -> None:
         """Blend this turn into the averages the timing filter budgets from."""
         weight = 0.4
@@ -518,12 +579,28 @@ class Boss(torch.nn.Module):
         scores = "\n".join(f"{name}: indice di artificialità {score:.2f}"
                            for name, score in self.sense.ranked())
 
+        # Work out what happened between people BEFORE judging it. Two cheap
+        # calls inside a 240-second window we were using five seconds of, and
+        # the first one is deliberately not allowed to name anybody: separating
+        # "what occurred" from "who was a machine" keeps the second question
+        # honest instead of letting it rationalise a hunch.
+        interactions = ""
+        try:
+            interactions = self._ask(f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
+                                     f"{transcript}", INTERACTION_SYSTEM,
+                                     situation="vote", max_tokens=200, temperature=0.3)
+            if TRACE:
+                print(f"[boss~interactions] {interactions[:300]}", flush=True)
+        except Exception as e:
+            print(f"[boss] interactions: {e}")
+
         prompt = (f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
                   f"TRASCRIZIONE\n{transcript}\n\n"
-                  f"STATISTICHE\n{evidence}\n\n"
+                  + (f"COME SI SONO RELAZIONATI\n{interactions}\n\n" if interactions else "")
+                  + f"STATISTICHE\n{evidence}\n\n"
                   f"PUNTEGGI AUTOMATICI (0 = sembra una persona, 1 = sembra un modello)\n"
                   f"{scores}\n\n"
-                  f"Chi era una persona vera?")
+                  "Chi era una persona vera?")
 
         names: list[str] = []
         meant_nobody = False
@@ -612,6 +689,11 @@ class Boss(torch.nn.Module):
         beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
 
         if not beat.speak:
+            # Nobody is waiting for us on a turn we are not taking, so it is the
+            # one moment a second call costs nothing: no latency for the room to
+            # notice, no second gateway handle, no thread. Rate-limited because
+            # the budget is shared with the turns that do speak.
+            self._maybe_profile()
             return ""
 
         reply = self._say(beat, last)
