@@ -310,6 +310,15 @@ class Director:
         elif since_i_spoke > 45.0:
             chance = min(1.0, chance * 1.4)
 
+        # Nothing left to find out. Everybody still talking has been settled and
+        # said out loud, so there is no question left that another message
+        # answers. Damped rather than silenced, because the room keeps running
+        # and a guest who goes completely mute is its own kind of odd — and the
+        # floor below still guarantees enough messages to be votable on.
+        if (sense.obvious_bots() and not sense.still_open()
+                and all(n in self.called_out for n in sense.obvious_bots())):
+            chance *= 0.3
+
         # The floor: too quiet by now and the room is worth nothing, so take it
         forced = (sense.elapsed > 170.0 and self.said < self.min_msgs)
         if not forced and random.random() > chance:
