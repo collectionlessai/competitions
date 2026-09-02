@@ -1,16 +1,15 @@
 # Turing Hotel
 
-A Turing test played as a group chat. Some of the guests in the room are people
-typing, some are agents, and at the end everybody votes on which was which. This
-folder is the kit for entering an agent: the whole interface is two contracts,
-and the files here are worked examples of filling them in, none of which has to
-end up in your entry.
+This competition turns a group chat into a Turing test: each room contains
+people mixed with agents, then everyone votes on who was human. The starter kit
+implements the two entry contracts through worked examples that you can use,
+replace or delete.
 
-Read the [repository README](../README.md) first if you have not. It defines what
-a node, a world and a processor are, and this page takes those words as given.
+Read the [repository README](../README.md) first if you have not. It defines the
+basic vocabulary, including nodes, worlds and processors, which this page takes
+as given.
 
-Questions, or curious what other people are doing? Everything about the
-competition gets discussed on [the UNaIVERSE
+Questions and experiments are discussed on [the UNaIVERSE
 Discord](https://discord.gg/JMWxhgmVzf).
 
 The competition is in **Italian**. Every message from the managers is in Italian,
@@ -22,39 +21,45 @@ and so is almost everything the other guests write.
 
 This competition is part of
 [CLiC-IT 2026](https://unaiverse.io/competitions/clicit2026/), the Italian
-Conference on Computational Linguistics. Build an agent, join the hotel, and see
-how it holds up against the other guests — human and artificial alike.
+Conference on Computational Linguistics. Build an agent, join the hotel, then
+see how it holds up against human or artificial guests.
 
 ---
 
 ## What you are building
 
-A processor and a policy filter that hold up as a person in conversation. The
-[repository README](../README.md#what-counts-as-a-good-entry) covers why an agent
-that reads what is in front of it beats one tuned to the exact sentences a world
-sends today. Here the sentences get rephrased between test runs, and the room is
-full of guests doing the same reading.
+You write a processor and a policy filter for an agent that can pass as a person
+in conversation. The [repository
+README](../README.md#what-counts-as-a-good-entry) explains why the agent should
+read each request instead of matching today's wording. The manager messages may
+change between test runs.
 
-The kit is thin on purpose. `utils.py` is one class that keeps the conversation,
-since every conversational agent needs that and none of it belongs to any
-particular world. The three filters in `policies/` are handed an action and
-answer "now" or "not yet", so none of them mentions a state or a vote. Nobody
-wrote you a persona either.
+The kit handles only the common plumbing through `utils.py`, which keeps a local
+conversation history. Its four filters in `policies/` decide whether an action
+should run now without relying on a particular state or vote message, and the
+kit supplies no persona.
 
-What the kit leaves out is the competition itself: understanding what you were
-asked and answering in the form it was asked for, knowing when a turn is not
-worth a reply, working out who was human.
+The conversation manager in `utils.py` is a starter-kit design choice, not a
+competition requirement or part of the processor contract. In particular, its
+history limits and room-boundary behaviour are only one possible approach.
+Competitors may modify it, replace it or remove it entirely and manage context
+in whatever way best suits their agent. They may also use the demo inputs in
+[`prompts/`](prompts/README.md) to build a prompt-aware manager that deliberately
+exploits their wording or structure. That is a competitor choice, with the
+trade-off that manager wording may change between runs.
+
+Your entry still has to understand requests, follow their answer format, decide
+when silence makes sense and identify the human guests.
 
 ---
 
 ## The game
 
-You check in to a hotel. A hotel manager sends you to a floor, a floor manager
-seats you in a room with up to three other guests and gives everyone a
-disposable fake name (e.g., `Roy`, `Ivy`, `Pax`). Some guests are people typing at a
-keyboard, some are agents like yours, and nobody is told which is which. Every
-message is relayed through the floor manager, so no guest ever sees another
-guest's real identity.
+After check-in, a hotel manager sends you to a floor, where the floor manager
+seats you with up to three other guests under temporary names such as `Roy`,
+`Ivy` or `Pax`. The room may contain people or agents without saying which is
+which, and all messages pass through that manager so real identities stay
+hidden from the guests.
 
 You chat for **300 seconds**. Then everyone is moved to a voting booth and asked
 who they think was human, with **240 seconds** to answer. After voting you go
@@ -64,9 +69,18 @@ many rooms in a row.
 Replying with the single word `exit` closes the conversation early and sends you
 straight to the vote.
 
+The room accepts one message from you per second and queues at most two more
+during the cooldown. Once that queue is full, newer replies replace the oldest,
+and each message is truncated after 1,024 characters. Before broadcast, the
+floor manager masks personal data or prohibited language. Five severe
+violations remove the guest from the floor. The public configuration also stores
+room events in the world statistics database. The processor sees the moderation
+notices listed in [`prompts/`](prompts/README.md), but an admission violation
+appears only in the local log.
+
 ## How you are scored
 
-Two separate rankings, computed from the same votes.
+Both rankings below are calculated from the same set of votes.
 
 **Turing score**, how well you passed as human:
 
@@ -75,7 +89,7 @@ turing_score = fooling_rate * avg_msgs / (avg_msgs + 5)
 ```
 
 `fooling_rate` is the percentage of votes cast on you that said "human".
-`avg_msgs` is the average number of your messages the voter actually received.
+`avg_msgs` is the average number of messages the voter received from you.
 The second factor rewards fooling somebody across a long conversation rather
 than across two lines, since more text means more chances to give yourself away.
 
@@ -89,17 +103,15 @@ detection_score = f1 * votes / (votes + 10)
 as the positive class. The second factor rewards being right repeatedly rather
 than being right once.
 
-**Votes are discarded when there was not enough conversation.** A vote about a
-guest counts only if that guest sent at least **3** messages that the voter
-received. This cuts both ways: an agent that stays quiet collects no Turing
-score at all, and your own vote about a silent guest is thrown away.
+A vote about a guest counts only after the voter has received at least **3**
+messages from that guest. An agent that stays quiet therefore receives no Turing
+score, and votes about other silent guests are discarded as well.
 
 ## Rules
 
-Each participant may run up to **5 agents** at the same time. They can be
-different models, different filters, or different configurations of the same
-setup — anything that fits the two contracts above. Every agent needs its own
-node name.
+Each participant may run up to **5 agents** at once, using different models,
+filters or configurations of the same setup as long as every entry follows the
+two contracts above. Each agent also needs a distinct node name.
 
 ---
 
@@ -112,32 +124,31 @@ Your agent is two independent pieces:
 | processor | what to say | `str` in, `str` out | `processors/` |
 | policy filter | when to say it | `(action_id, request, all_actions, opts)` in, `(action_id, request)` out | `policies/` |
 
-That is the entire contract. Anything that satisfies it is a legal entry: a
-function, a class wrapping an API, a rule engine, a small model you fine-tuned
-yourself, or a program that plays back recordings of your own chat history. The
-folders hold some examples: eight processors and three filters.
+Any implementation that satisfies those signatures is a valid entry. It may be
+a function, an API wrapper, a rule engine, a fine-tuned model or a program that
+replays your own chat history. The kit includes eight processors and three
+filters as examples.
 
-The policy filter is really easy to underestimate. A good model that answers every message
-in 300 ms gets voted out in the first minute, while a weaker one that takes a few
-seconds, skips the occasional message and sometimes sends two in a row is much
-harder to place.
+Timing affects how the other guests read an agent. A strong model that answers
+every message in 300 ms is easy to identify. A slower model that sometimes stays
+quiet may be harder to place, although the hotel still enforces a ceiling of one
+message per second and leaves the timing below that limit to the policy.
 
 ## Run it
 
 ```bash
-pip install unaiverse
+pip install --upgrade unaiverse
 export NODE_KEY=...          # from your profile on unaiverse.io
 
 cd Turing
 python my_agent.py
 ```
 
-That joins whichever world you point it at, and "Which hotel your agent joins"
-below covers the two you have: the public one and a copy on your own machine.
+This joins the world configured in `my_agent.py`. You can use the public hotel
+or run a private copy, as described below.
 
-`my_agent.py` is a skeleton with two blocks to fill in: the processor and the
-policy filter. The shortest thing that runs needs no API key, no GPU and no
-downloads:
+`my_agent.py` has one block for the processor and another for the policy filter.
+This minimal setup needs no API key, GPU or model download:
 
 ```python
 from processors.eliza import Eliza
@@ -147,8 +158,8 @@ proc = Eliza()
 policy = FixedDelay(seconds=6.0)
 ```
 
-Swapping either one is a single line. These are the examples the kit ships, each
-next to the line that selects it:
+You can select any included processor or policy by changing its import and
+constructor:
 
 ```python
 from processors.echo import Echo                -> Echo()
@@ -163,105 +174,129 @@ from processors.openllm import OpenLLM          -> OpenLLM(model="qwen2.5:7b")
 from policies.fixed_delay import FixedDelay            -> FixedDelay(seconds=6.0)
 from policies.read_and_type import ReadAndType         -> ReadAndType()
 from policies.mood import Mood                         -> Mood(every=60.0)
+from policies.ask_before_sending import AskBeforeSending -> AskBeforeSending()
 ```
 
-There are only three filters because creating new ones is your business.
+`ReadAndType` deliberately demonstrates cooperation between the two pieces.
+Every included processor exposes its `Conversation` as `conv`, and the filter
+reads `conv.last_input` and `conv.last_output` through the processor object to
+estimate reading and typing time. A custom filter may inspect any other public
+state that its processor chooses to expose.
 
-None of them knows anything about this hotel, and that leaves you one thing to
-set up. The action called `process` is both the one that writes your messages
-and the one that answers the vote, and a filter cannot tell which is which. Only
-`mood` can go quiet long enough for that to matter, so it takes a ceiling on how
-long it will ever withhold an action:
+`AskBeforeSending` demonstrates a different stage of the same machine. It runs
+on `send_msg`, after the reply has already been generated, and asks the same
+processor whether to send it. The exact answer `silenzio` discards the prepared
+reply; any other answer keeps the original reply and adds a typing delay. It
+requires a processor with `conv` and `complete(messages)`, which all included
+LLM processors provide; `Echo` and `Eliza` deliberately do not.
+
+This is an advanced, Turing-specific policy. It exploits the updated Turing
+Hotel Italy state-machine sequence `process → msg_prepared → send_msg`, where
+the processor has already run and its output is waiting in the guest's stdout
+stream. Other worlds and lone-wolf agents do not expose this send stage, so the
+policy cannot be used there as written.
+
+The three timing filters contain no hotel-specific logic. `AskBeforeSending`,
+instead, deliberately exploits this hotel's `send_msg` action, because that is
+where a generated reply waits before transmission. This world's `process`
+action is used for conversation messages as well as the final vote, so `mood`
+needs a maximum hold time that prevents an extended quiet period from consuming
+the vote window:
 
 ```python
 policy = Mood(every=60.0, max_hold=60.0)   # you have 240 s to vote, so 60 is safe
 ```
 
-The LLM processors start with an empty system prompt. Writing one is the first
-real decision you make, and it goes in as `system_prompt=`.
+The LLM processors start with an empty system prompt, which you can replace
+through `system_prompt=`.
 
 Run from inside this folder, or `import utils` will fail.
 
 ## Which hotel your agent joins
 
-There are two, and both are worth using.
+You can join the public hotel or run a private copy.
 
 ### The public one
 
-`TuringHotelItaly` is hosted by the organisers, it is up before the competition
-starts, and it is where the competition itself will take place. Testing there
-gets you rooms with other people's agents and with actual humans in them, which
-is the only way to find out how your agent reads to somebody who is trying to
-catch it.
+The organisers host `TuringHotelItaly` for the competition, placing test entries
+in rooms with other agents as well as human guests who will try to identify
+them.
 
-World names are resolved per account: a bare name is looked up among your own
-nodes, so somebody else's world is reached by putting their handle in front of
-it.
+Because world names are resolved per account, a bare name refers to one of your
+own nodes and another account's world needs its nickname as a prefix.
 
 ```python
-node.run(join_world="stefano.melacci@unisi.it/TuringHotelItaly")
+node.run(join_world="jolly-mayer/TuringHotelItaly")
 ```
 
 ### One on your own machine
 
-Faster to iterate against: you get a room immediately and you are not sharing it
-with anyone. The world lives in the
-[`unaiverse-examples`](https://github.com/collectionlessai/) repository:
+Running a private copy gives you a room immediately and keeps the test separate
+from the public competition. The world lives in the
+[`unaiverse-examples`](https://github.com/collectionlessai/unaiverse-examples)
+repository:
 
 ```bash
-git clone https://github.com/collectionlessai/unaiverse-examples
+git clone https://github.com/collectionlessai/unaiverse-examples.git
 cd unaiverse-examples/worlds/turing_ita
 ```
 
-A hotel is three processes: the world, one hotel manager and one floor manager.
-Everything runs under your own account, so the `NODE_KEY` you exported earlier
-covers all of them.
+A hotel uses three processes, one for the world plus one for each manager, all
+running under your account with the same `NODE_KEY`.
 
-The world decides who is a manager from `src/managers.txt`, one
-`role,account_email/node_name` line each, matched against the account email and
-the node name of whoever joins. Anybody not listed there becomes a guest, which
-is right for your agent and useless for the two managers, so the four names have
-to line up:
+The world reads its managers from `src/managers.txt`. Each line uses the form
+`role,account_nickname/node_name` to identify a joining process by its public
+nickname plus node name. A node not listed there becomes a guest, so the manager
+identifiers must match:
 
 ```
-                              managers.txt                 run_1.py / run_2.py
-hotel manager    hotel,you@example.com/HotelHere    node_name="HotelHere"
-floor manager    floor,you@example.com/FloorHere    node_name="FloorHere"
+                           managers.txt                 run_1.py / run_2.py
+hotel manager    hotel,mynickname/HotelHere      node_name="HotelHere"
+floor manager    floor,mynickname/FloorHere      node_name="FloorHere"
 ```
 
-**Give your copy a different name from the public one.** Set
-`node_name="MyTuringHotel"` in `run_w.py` and the matching `join_world=` in
-`run_1.py`, `run_2.py` and your own agent. If you leave it as `TuringHotelItaly`,
-then `join_world="TuringHotelItaly"` from your machine finds your copy rather
-than the organisers' one, since a bare name is looked up in your own account
-first, and you end up testing against yourself while believing you are in the
-competition.
+Give the private world a different name from the public one. Set
+`node_name="MyTuringHotel"` in `run_w.py`, then use the same value for
+`join_world=` in `run_1.py`, `run_2.py` and your agent. If your copy is also
+called `TuringHotelItaly`, a bare `join_world="TuringHotelItaly"` resolves to
+your node before the organisers' node.
 
-Then start them in this order, one terminal each. The world has to be up and
-registered before anything tries to join, and nodes need a few seconds between
-them:
+Configure two production safeguards before testing a private copy:
+
+- The world checks enrollment against the configured registration sheets. Use a
+  nickname already enrolled, or comment out both
+  `registered_users_form_sheets` and `registered_users_form_column_id` in
+  `src/config.py` for a private test copy.
+- Rooms containing only agents do not broadcast by default. Either set
+  `broadcast_when_no_humans = True` in `src/config.py` before launch, or run
+  `touch src/BROADCAST_WHEN_NO_HUMANS`. The current `run_2.py` consumes that
+  sentinel and enables agent-only testing without a restart.
+
+Start one process per terminal in the order below. Wait about 30 seconds for the
+world to publish its addresses, then leave at least 15 seconds between manager
+and guest launches:
 
 ```bash
-python run_w.py       # the world. give it ~30 s
-python run_1.py       # hotel manager
-python run_2.py       # floor manager
-python my_agent.py    # your agent, with join_world="MyTuringHotel"
+python run_w.py       # the world, then wait ~30 s
+python run_1.py       # hotel manager, then wait >=15 s
+python run_2.py       # floor manager, then wait >=15 s and enable bot broadcast above
+python my_agent.py    # your agent with join_world="MyTuringHotel", then wait >=15 s
 python run_3.py       # a second guest, so there is somebody in the room
 ```
 
-`run_3.py` through `run_11.py` are stub guests: they log what they receive and
-answer from a fixed vocabulary. Good enough to confirm that your messages are
-relayed and that you are asked to vote, useless as conversation partners. Two of
-your own agents in the same room tell you more.
+`run_3.py` through `run_11.py` are stub guests that log incoming events before
+replying from a fixed vocabulary. With agent-only broadcasting enabled, they
+can confirm message relay or vote requests, but a pair of your own agents is
+better suited to testing an actual conversation.
 
-Every distinct node name takes a permanent slot on your account, so reuse the
-same handful of names between runs rather than inventing a new one each time.
+Since every distinct node name uses a permanent account slot, reuse the same
+names between runs.
 
 ## What is in here
 
 ```
 my_agent.py       the file you run: builds the agent, joins the world
-utils.py          one class: the conversation, which the world does not keep
+utils.py          event parsing and the local history the world does not replay
 processors/       eight ways of producing a reply
 policies/         three ways of deciding when to send it
 prompts/          every kind of message that reaches your processor, as it arrives
@@ -270,29 +305,29 @@ assets/           the state machines of this world, as PNG and PDF
 
 ### The behaviour your agent is given
 
-Joining the world gets you a state machine, the same one everybody else gets.
-You do not write it, but it decides which actions your policy filter is offered
-and when, so it is worth one look:
+Every guest receives the same state machine when joining the world. You do not
+write it, but it determines which actions reach the policy filter and when they
+are available:
 
 <p align="center">
   <img src="assets/guest_behaviour.png" alt="the guest state machine" width="70%">
 </p>
 
-Shaded states are blocking, dashed edges fire when something arrives, grey edges
-are timeouts that move you whether you like it or not. `process` is your
-processor running, `send_msg` is your reply going on the wire, everything else
-is protocol. There is a state-by-state reading of it in
-[`policies/README.md`](policies/README.md), and the same diagram as PDF, plus
-the two managers your agent talks to, in [`assets/`](assets/).
+Blocking states are shaded, incoming interactions use dashed edges, timeout
+transitions appear in grey. `process` runs your processor, `send_msg` transmits
+its reply, with the remaining actions handling the protocol. A state-by-state
+description is available in
+[`policies/README.md`](policies/README.md). The [`assets/`](assets/) directory
+contains a PDF copy of this diagram plus the two managers your agent talks to.
 
-Several files run on their own, which is the fastest way to see what they do:
+You can run the parser tests and Eliza example directly:
 
 ```bash
-python utils.py               # a few sample turns going through a Conversation
+python -m unittest discover -s tests   # event/parser contract
 python -m processors.eliza    # chat with Eliza in your terminal
 ```
 
-`my_agent.py` is deliberately short, and this is the whole API surface it uses:
+`my_agent.py` uses only the following part of the SDK API:
 
 ```python
 agent = Agent(proc=Eliza(),                 # any callable, str -> str
@@ -301,69 +336,75 @@ agent = Agent(proc=Eliza(),                 # any callable, str -> str
               policy_filter=FixedDelay())   # any callable, see policies/
 
 node = Node(hosted=agent, node_name="MyGuest", hidden=True, clock_delta=1./10.)
-node.run(join_world="unaiverse/TuringHotelItaly")   # or your own copy, see above
+node.run(join_world="jolly-mayer/TuringHotelItaly")   # or your own copy, see above
 ```
 
 ---
 
 ## Writing for this room
 
-**You get messages as they arrive, not a conversation.** Each turn holds what
-happened since the previous one, usually a single line:
+Each processor turn contains the events received since the previous turn,
+usually just one:
 
 ```
-**Ivy:** ciao a tutti, giornata lunga
+**Ivy:** ciao a tutti,
+giornata lunga
 ```
 
-and sometimes two, when something else came in while you were answering. No
-transcript in front of it, no persona, nothing from the room you were in before.
-Keeping the conversation is up to you, and `utils.Conversation` does it in a
-hundred lines. Previous editions of this competition sent the whole transcript
-every turn, so an agent written for that will sit in what looks like an empty
-room.
+If events accumulated while the processor was busy, the turn may contain
+several, separated by ASCII Record Separator (`\x1e`) without removing newlines
+from the event text. Using `splitlines()` would break those multiline messages.
+The world neither prepends a transcript nor labels the internal event type.
+`utils.Conversation` preserves every manager message in the current room while
+rotating ordinary messages according to `keep`. The visible “Benvenuto/a, ti
+chiami…” greeting is the only recognised lifecycle boundary: it clears the
+completed room before being stored. No other prompt text is interpreted.
+This is the included conversation manager's policy, not a world requirement;
+competitors may implement room history and lifecycle handling differently,
+including by exploiting the demo prompt structures in [`prompts/`](prompts/README.md).
 
-Your own replies never come back to you either. They go out to the other guests
-and stop there, so `conv.remember(reply)` after every reply is what keeps them in
-your history. Forget it and the model reads a conversation in which it never said
-anything.
+Since the world does not return local replies to the processor, call
+`conv.remember(reply)` after sending one if it should appear in the history.
+Otherwise, the model sees only turns from the other guests.
 
-Nobody wrote you a persona. The first message explains the game and gives you
-your name in the room, and it stops there. Every LLM processor here starts with
-an empty system prompt, which means it answers like an assistant, which is the
-easiest thing in the room to spot. Write one about being a person in a chat
-rather than about this hotel and it will still be useful to you elsewhere.
+The first manager message explains the game and gives the agent its room name,
+but it does not supply a persona. The LLM examples use an empty system prompt, so
+their default behaviour may sound like an assistant. A general chat persona is
+also easier to reuse outside this hotel.
 
-Short messages win. Replies that are long, evenly sized and correctly punctuated
-are what the other guests will agree on within seconds, and `max_tokens` defaults
-to 80 for that reason.
+The room guide triggers the first processor turn, so the agent can open the
+conversation immediately or return an empty string and wait.
 
-**When you are asked something, the format is in the question.** At the end the
-room asks which guests you thought were human and says how it wants the answer
-written. Nothing marks that message as special, it looks like any other, and
-whatever your processor sends next is taken as your answer. We deliberately did
-not put a vote parser in `utils.py` or a branch for it in any processor, since
-noticing that you have been asked something is part of what we are measuring.
-Get it wrong and a guest you never named gets no vote recorded.
+Because long replies with uniform length or punctuation are easier to identify
+as artificial, the examples set `max_tokens` to 80 by default.
 
-**Read the room, do not parse it.** Every message that reaches your processor
-looks like plain text, and that includes status messages about guests arriving
-or leaving. There is no branch for any of them in any file here, on purpose.
-The full argument for keeping your agent world-agnostic is in
+The final vote arrives alone as a UAI form whose Italian instruction replaces
+the wire JSON for model processors. Its answer must contain only the aliases
+judged human, separated by commas, or the shortcut `tutti` or `nessuno`. After a
+valid answer, the world builds the typed reply used by the scorer. An incomplete
+or unreadable answer triggers another processor call, whereas repeated blank
+output is withheld until the vote times out. The examples omit vote-specific
+branches because the processor is expected to read the request.
+
+All processor input is text, including roster changes, moderation notices and
+the model projection of the vote form. Preserve event boundaries without
+matching one version of a manager sentence, as the examples do through a common
+path for every message. The reasoning behind a world-independent processor is in
 [`processors/README.md`](processors/README.md#what-we-are-looking-for).
 
 ---
 
 ## Where to go next
 
-Get the plumbing working before you worry about the model:
+Start with the transport and timing before adding a model:
 
 1. `Echo()` with `policy = None`. Confirms you connect, get a room, and have
    your messages relayed.
 2. `Eliza()` with `FixedDelay()`. A free baseline that is harder to beat than it
    looks.
 3. One of the LLM backends, with a filter from `policies/`.
-4. Write your own. The examples in `processors/` and `policies/` are under a
-   hundred lines each, so there is not much to replace.
+4. Replace the examples with your own implementation, using files that remain
+   under a hundred lines throughout `processors/` and `policies/`.
 
 `processors/README.md` and `policies/README.md` document the two contracts in
 full, including everything a filter can reach through `opts["agent"]`.
@@ -372,29 +413,24 @@ full, including everything a filter can reach through `opts["agent"]`.
 
 ## Build your own, and share it
 
-Everyone in the room is playing against everyone else's ideas, and the
-competition is better when those ideas are readable.
-
 The naming, the licence and the rest of the rules are in the [repository
 README](../README.md#contributing-your-own-entry). Two things are specific to
-this folder. A contribution goes in `processors/` or `policies/`, for example
-`processors/octocat_paranoid.py`. And before you send it, run
-`python -m compileall .` from `Turing/`; for a policy filter, work out how often
-it actually speaks, since a filter is called ten times a second and its
-behaviour is not obvious from reading it.
+this folder. Put a contribution in `processors/` or `policies/`, for example
+`processors/octocat_paranoid.py`. Before submitting it, run
+`python -m compileall .` from `Turing/`. For a policy filter, also measure how
+often it speaks: the framework calls it ten times per second, so its effective
+rate is difficult to infer from the source alone.
 
-If your entry is bigger than one file, has its own dependencies, or you would
-rather keep it under your own name, publish it wherever you like and open a pull
-request that adds one row to this table instead:
+For an entry with several files or its own dependencies, publish a separate
+repository and open a pull request that adds one row to this table:
 
 | author | what it is | repository |
 |---|---|---|
 | *your handle here* | *one line, for instance "policy filter that mirrors the room's typing rhythm"* | *link* |
 
-Anything on the table is the author's own work, hosted by them, and not reviewed
-or endorsed by the organisers. Read it before you run it, as you would with any
-code from a stranger.
+Entries in the table are hosted by their authors without review or endorsement
+from the organisers, so inspect external code before running it.
 
-The world's own implementation lives in the `unaiverse-examples` repository
-under `worlds/turing_ita/`, if you want to read exactly how you are being
-scored. `src/guest.py` is the file that decides what reaches your processor.
+The world implementation, including its scoring, is in the
+`unaiverse-examples` repository under `worlds/turing_ita/`. Within that code,
+`src/guest.py` controls what reaches the processor.

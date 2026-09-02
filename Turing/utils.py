@@ -1,12 +1,16 @@
-"""Keeps the conversation.
+"""Keep a local conversation across processor turns.
 
 Each turn your processor gets one string with whatever arrived since the
-previous turn, one message per line:
+previous turn. The guest role selects which world events to forward, removes
+their internal routing tags, then separates a backlog with ASCII Record
+Separator (``\x1e``). Newlines cannot mark boundaries because one delivered
+event may itself span several lines:
 
-    **Ada:** ciao a tutti, giornata lunga
+    **Ada:** ciao a tutti,
+    giornata lunga
 
-Your own replies are not in there and never will be, so the two calls that keep
-the history whole are add() on the way in and remember() on the way out:
+The world does not echo your replies. Add incoming samples with add(), then save
+each outgoing reply with remember():
 
     conv = Conversation(keep=80)
 
@@ -15,32 +19,54 @@ the history whole are add() on the way in and remember() on the way out:
         reply = my_model(conv.as_messages(system=persona))
         conv.remember(reply)
         return reply
+
+This conversation manager is an optional starter-kit implementation, not a
+competition rule. Competitors may change, replace or omit it; a processor only
+has to honour its public ``str -> str`` contract. The demo inputs under
+``prompts/`` may also be used to build a manager that deliberately exploits
+their wording or structure, accepting that those details may change between
+runs.
 """
 
 import re
 from collections import namedtuple
 
 
+EVENT_SEPARATOR = "\x1e"
+DISPLAY_EVENT_SEPARATOR = "␞"
 SPEAKER = r"^\*\*(.+?):\*\*\s?(.*)$"
+MANAGER_SPEAKER = "MANAGER"
+ROOM_START = r"^\*\*MANAGER:\*\*\s*Benvenuto/a,\s+ti chiami\s+\*\*"
 
-# speaker: who sent it, "" when the line carries no name
-# text:    what they said, whitespace stripped and nothing else touched
-# mine:    True for the lines you added with remember()
+# speaker: sender name, or "" for an event with no name
+# text:    event body with surrounding whitespace removed
+# mine:    True when remember() stored the reply
 Message = namedtuple("Message", "speaker text mine")
 
 
 class Conversation:
-    """Messages, oldest first, capped at the last `keep`.
+    """Store messages in arrival order, optionally capped by `keep`.
+
+    This retention policy is the starter kit's choice. It is not prescribed by
+    the world, and competitors are free to implement conversation state in a
+    different way, including by exploiting the demo inputs under ``prompts/``.
 
     Args:
-        keep: how many messages to hold on to, 0 for all of them. Old ones fall
-            off as new ones arrive, so an agent left running for hours keeps a
-            bounded history. The cap counts messages, not tokens.
-        speaker_pattern: two groups, speaker and text, matched against each line
-            of a sample. A line that does not match is kept whole, with no
-            speaker, so a world with its own format needs its own pattern here.
-        me: how your own lines are labelled in transcript(). as_messages() does
-            not use it, since there your lines are `assistant` turns.
+        keep: Maximum number of ordinary messages to retain, or 0 for no limit.
+            Manager messages never count towards this cap and are never rotated
+            out. The limit counts messages rather than tokens.
+        speaker_pattern: Pattern with speaker and text groups, applied to each
+            event. Unmatched events keep their full text with an empty speaker.
+            Supply another pattern for worlds with a different format.
+        me: Label for local replies in transcript(), replaced by the
+            `assistant` role inside as_messages().
+
+    The world removes internal tags such as ``[START_MSG]`` before the processor
+    sees a sample. This class recognises only the visible new-room greeting, so
+    history from completed rooms is discarded. It does not interpret any other
+    prompt wording or world-specific structure. ``last_input`` and
+    ``last_output`` expose the most recent completed processor turn to policies
+    or other cooperating components.
     """
 
     def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER, me: str = "io"):
@@ -50,73 +76,99 @@ class Conversation:
         self.reset()
 
     def reset(self) -> None:
-        """Drop everything, for when you decide the conversation you were in is over."""
+        """Clear the conversation history, last turn and known speakers."""
         self.history: list[Message] = []
         self.speakers: list[str] = []   # in the order they first spoke
+        self.last_input = ""
+        self.last_output = ""
 
     def add(self, sample: str) -> list[Message]:
-        """Store one processor input and return the messages it contained.
+        """Store one processor input and return its delivered events.
 
-        One message per line. A line the pattern does not match becomes a
-        message with no speaker, and a line carrying a name with nothing after
-        it registers the speaker without going into the history, since empty
-        messages are dropped on the way in.
+        Only ``EVENT_SEPARATOR`` divides events, so internal newlines remain in
+        the text. Routing tags have already been removed by the guest role. If
+        the speaker pattern does not match, the whole event is stored with an
+        empty speaker. A named event with no body still registers that speaker,
+        although empty messages are omitted from the history.
         """
         new = []
-        for line in sample.splitlines():
-            line = line.strip()
-            if not line:
+        for event in sample.split(EVENT_SEPARATOR):
+            event = event.strip()
+            if not event:
                 continue
-            match = self.pattern.match(line)
+            if re.match(ROOM_START, event, re.S):
+                self.reset()
+            match = self.pattern.match(event)
             if match:
                 speaker, text = match.group(1).strip(), match.group(2).strip()
             else:
-                speaker, text = "", line   # keep unrecognised lines whole
-            new.append(Message(speaker=speaker, text=text, mine=False))
-
-        for message in new:
+                speaker, text = "", event   # Preserve the full unmatched event.
+            message = Message(speaker=speaker, text=text, mine=False)
+            new.append(message)
             if message.speaker and message.speaker not in self.speakers:
                 self.speakers.append(message.speaker)
             self._store(message)
+        self.last_input = sample
         return new
 
     def remember(self, text: str) -> None:
-        """Store a line you sent, since it never arrives back through add()."""
-        self._store(Message(speaker="", text=text.strip(), mine=True))
+        """Store a local reply that the world will not echo through add()."""
+        self.last_output = text.strip()
+        self._store(Message(speaker="", text=self.last_output, mine=True))
+
+    def discard_last_output(self) -> None:
+        """Forget the latest local reply when a policy decides not to send it."""
+        if self.history and self.history[-1].mine:
+            self.history.pop()
+        self.last_output = ""
 
     def _store(self, message: Message) -> None:
         if not message.text:
             return
         self.history.append(message)
-        if self.keep and len(self.history) > self.keep:
-            del self.history[:-self.keep]
+        if not self.keep:
+            return
+
+        # Starter-kit policy: manager messages carry rules, rosters, reminders
+        # and vote requests, so retain them for the current room and apply
+        # `keep` only to guest messages and our own remembered replies.
+        # Competitors may choose a different conversation-management policy.
+        overflow = sum(item.speaker != MANAGER_SPEAKER for item in self.history) - self.keep
+        if overflow <= 0:
+            return
+        retained = []
+        for item in self.history:
+            if overflow > 0 and item.speaker != MANAGER_SPEAKER:
+                overflow -= 1
+                continue
+            retained.append(item)
+        self.history[:] = retained
 
     def last_message(self, mine: bool = False) -> Message | None:
-        """The last message somebody else sent, or your own with mine=True, or None."""
+        """Return the latest remote message, or a local one when mine=True."""
         for message in reversed(self.history):
             if message.mine == mine:
                 return message
         return None
 
     def transcript(self, limit: int | None = None) -> str:
-        """The last `limit` messages as `Speaker: text` lines, or all of them.
+        """Render up to `limit` recent messages as `Speaker: text` entries.
 
-        Your own are labelled with `me`, anything that arrived without a name
-        with `?`.
+        Local replies use `me`, and events without a sender use `?`. A limit
+        of ``None`` or 0 includes the entire history.
         """
         messages = self.history[-limit:] if limit else self.history
         return "\n".join(f"{self.me if m.mine else (m.speaker or '?')}: {m.text}"
                          for m in messages)
 
     def as_messages(self, system: str = "", nudge: str = "") -> list[dict]:
-        """The history as OpenAI-style chat messages.
+        """Render history as chat messages, using `assistant` for local replies.
 
-        Your lines are `assistant` turns, everybody else's are `user` turns with
-        the speaker's name in front, which is how the model can tell three people
-        apart inside one role. Runs of the same role collapse into one message,
-        and the list always ends on a `user` turn: when your own line is the
-        most recent thing in the history, `nudge` goes on the end, or
-        `(tocca a te)` if you did not pass one.
+        Remote events use the `user` role but retain the speaker name in their
+        text, so the model can distinguish several guests inside one role.
+        Consecutive turns with the same role are merged. If a local reply is
+        last, the list ends with `nudge`, or with `(tocca a te)` when no nudge
+        is supplied.
         """
         out: list[dict] = []
         if system:
@@ -133,5 +185,3 @@ class Conversation:
         if not out or out[-1]["role"] != "user":
             out.append({"role": "user", "content": nudge or "(tocca a te)"})
         return out
-
-

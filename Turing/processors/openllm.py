@@ -3,8 +3,9 @@
     pip install openllm openai
     openllm serve qwen2.5:7b
 
-BentoML's server. It listens on port 3000 and speaks the OpenAI API, so this is
-again the body from `openai_chat.py`, with the 60 second timeout of `ollama.py`.
+BentoML's server listens on port 3000 and implements the OpenAI API. This client
+therefore follows `openai_chat.py`, but uses the 60-second timeout from
+`ollama.py`.
 """
 
 import torch
@@ -19,7 +20,7 @@ class OpenLLM(torch.nn.Module):
                  system_prompt: str = "", max_tokens: int = 80,
                  temperature: float = 1.0, keep: int = 80):
         super().__init__()
-        self.client = OpenAI(base_url=url, api_key="EMPTY", timeout=60.0)  # nothing checks it
+        self.client = OpenAI(base_url=url, api_key="EMPTY", timeout=60.0)  # The server ignores this key.
         self.model = model
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
@@ -42,7 +43,7 @@ class OpenLLM(torch.nn.Module):
             reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
         except Exception as e:
             print(f"[openllm] {e}")
-            return "un secondo"
+            reply = "un secondo"
 
         self.conv.remember(reply)
         return reply

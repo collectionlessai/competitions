@@ -3,11 +3,10 @@
     pip install openai
     export OPENROUTER_API_KEY=sk-or-...
 
-Same body as `openai_chat.py`, which is where it is explained. Two things are
-different here. The key is read with `os.environ[...]` inside the constructor,
-so forgetting the export raises a `KeyError` before you have a processor at all.
-And the model id carries the vendor in front of it: the default is
-`meta-llama/llama-3.1-8b-instruct`.
+This processor follows `openai_chat.py` with two service-specific changes. The
+constructor reads its key through `os.environ[...]`, so a missing export raises
+`KeyError` before the processor is created. Model identifiers include the
+vendor prefix, as in the default `meta-llama/llama-3.1-8b-instruct`.
 """
 
 import os
@@ -49,7 +48,7 @@ class OpenRouter(torch.nn.Module):
             reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
         except Exception as e:
             print(f"[openrouter] {e}")
-            return "aspetta un secondo"
+            reply = "aspetta un secondo"
 
         self.conv.remember(reply)
         return reply

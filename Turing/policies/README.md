@@ -1,8 +1,8 @@
 # Policies: when to say it
 
-A policy filter is a callable the framework runs after the agent has decided
-what to do next and just before it does it. It can let the decision through,
-withdraw it, or replace it with a different one.
+A policy filter is a callable that runs after the agent selects an action but
+before that action starts. It can accept the selection, postpone it or replace
+it with another available action.
 
 ```python
 class MyFilter:
@@ -12,25 +12,34 @@ class MyFilter:
         return -1, None              # not this one, ask me again
 ```
 
-Pass an instance to the agent and you are done:
+Pass an instance to the agent:
 
 ```python
 Agent(proc=..., proc_inputs=["text"], proc_outputs=["text"], policy_filter=MyFilter())
 ```
 
-Any callable with that signature works, including a plain function, and `None` is
-allowed too. The three files here are worked examples. Write your own and none of
-this folder needs to survive.
+Any callable with that signature works, including a plain function, with `None`
+disabling filtering. The four files in this folder are independent examples
+that you can replace with your own implementation.
 
-## Nothing here knows about hotels
+## Keep filters independent of the hotel
 
-A filter is handed an action and answers "now" or "not yet". That is the whole of
-what it ever sees, in any world, so nothing in this folder knows what a hotel, a
-room, a guest or a vote is. Which model you chose does not enter into it either.
-Each of them is under a hundred lines and runs anywhere an agent produces
-output.
+A filter receives an action and decides whether it should run now. The three
+timing examples use no hotel, room, guest or vote concepts. `AskBeforeSending`
+is intentionally different: it targets the Turing guest's `send_msg` action and
+requires a processor exposing `conv` and `complete(messages)`. Each file stays
+under a hundred lines.
 
-Two habits keep it that way while you edit:
+`AskBeforeSending` is the advanced example. It exploits the updated Turing
+Hotel Italy behavior: `process` generates a reply, `msg_prepared` holds it, and
+`send_msg` later reads it from stdout. A filter can therefore review or erase
+that reply between generation and transmission. This lifecycle is not part of
+the general policy-filter contract, does not exist in lone-wolf mode, and is
+not guaranteed by other worlds. The policy is consequently unsupported outside
+this specific world unless another world deliberately implements the same
+action and stream lifecycle.
+
+Two conventions keep portable filters separate from a particular world:
 
 * Take world knowledge as an argument rather than a constant. Which actions to
   pace is already `actions=("process",)`, and a state name or a timeout belongs
@@ -48,26 +57,26 @@ PolicyFilterDelayAction({"process"}, wait=5., add_random_up_to=2.)
 PolicyHumanLikeDelay({"process"}, median_delay=5.0, variability=0.6)
 ```
 
-`fixed_delay.py` here is a readable equivalent of the first. Everything past it is
-what you cannot get off the shelf.
+`fixed_delay.py` is a readable version of the first utility. The other examples
+cover behaviour that those SDK filters do not provide.
 
 ---
 
 ## What you are overriding
 
-The agent already has a policy of its own, and your filter runs after it. Given
-the actions that are feasible right now, the default picks, in order:
+The agent applies its built-in policy before calling your filter. From the
+actions currently available, that policy selects the first matching case below:
 
-1. any action marked high priority, oldest attached interaction first;
+1. any action marked high priority, oldest attached interaction first
 2. otherwise any action that has a pending interaction, oldest first, which is
    how a message somebody sent you gets answered before anything you might do on
-   your own initiative;
-3. otherwise the first action marked ready;
-4. otherwise nothing, and the tick passes with the agent idle.
+   your own initiative
+3. otherwise the first action marked ready
+4. otherwise the agent stays idle for that tick
 
-You are handed its choice and can accept it, withdraw it, or swap it for another
-action from the same list. The ranking above still runs first, and an action the
-state machine already ruled out never reaches you.
+Your filter receives that choice and may accept, withdraw or replace it with
+another action in the same list. The ranking still runs first, and actions ruled
+out by the state machine never reach the filter.
 
 ---
 
@@ -75,30 +84,30 @@ state machine already ruled out never reaches you.
 
 ### When it is called
 
-Not on a fixed schedule. It is called **once for every action the agent is about
-to start**, and two things follow from that:
+The filter does not run on a fixed schedule. It is called once for every action
+the agent is about to start, with two consequences:
 
 * While a multi-step action is already running, neither the agent's own policy
   nor your filter is consulted at all.
 * Within one clock tick the state machine can try several actions in turn, and
   your filter is called separately for each of them. It is not "once per tick".
 
-With `clock_delta=1./10.` the agent gets ten ticks a second, and "the agent
-wants to speak" stays true on every one of them until you let it through. Every
-example in this folder is written around that.
+With `clock_delta=1./10.`, the agent runs ten ticks per second. A pending wish to
+speak appears again on every tick until the filter accepts it, which is the
+timing assumed by the examples in this folder.
 
-If your filter raises, the framework logs the exception and keeps the original
-decision for that call. A broken filter makes your agent chatty, not dead.
+If the filter raises an exception, the framework logs it before keeping the
+original decision, so the action runs without filtering for that call.
 
 ### `action_id: int`
 
-An index into `all_actions`. It is what the agent's own policy picked, and it is
-always `>= 0` when your filter is called.
+This is the index in `all_actions` selected by the agent's policy, and it is
+always `>= 0` when the filter runs.
 
 ### `all_actions: list[Action]`
 
-The actions that are feasible right now, in the current state. `Action` is a
-class (`unaiverse.hsm.action.Action`), not a dictionary:
+This list contains the actions available in the current state. Each item is an
+`unaiverse.hsm.action.Action` object, not a dictionary:
 
 | attribute | type | what it is |
 |---|---|---|
@@ -116,31 +125,30 @@ class (`unaiverse.hsm.action.Action`), not a dictionary:
 
 ### One behaviour, as an example
 
-Every world pushes its own state machine, so what your filter is offered depends
-on where the agent is. Below is the guest behaviour of this hotel, generated from
-the world's own `guest.json`. Read it once so the names in the examples mean
-something, then write a filter that would survive its being different.
+The available actions depend on the state machine supplied by the world. This
+diagram is generated from the hotel's `guest.json` and explains the names used
+in the examples. Portable filters should still accept those names as
+configuration instead of assuming this exact machine.
 
 <p align="center">
   <img src="../assets/guest_behaviour.png" alt="the guest state machine" width="70%">
 </p>
 
-Shaded states are blocking, which means one pass per tick. Dashed edges fire on
-something arriving rather than on your agent deciding to act. Grey edges are
-teleports: timeouts that move you whether you like it or not. The number in
-front of each action is the order the state machine tries them in.
+Blocking states are shaded and limited to one pass per tick. Incoming
+interaction edges are dashed, timeout teleports appear grey, with a number
+before each action showing the order in which the state machine tries it.
 
-The same diagram as PDF, plus the two managers you are talking to, is in
+The same diagram is available as a PDF in
 [`../assets/`](../assets/): `guest_behaviour.pdf`, `floor_manager_behaviour.pdf`,
 `hotel_manager_behaviour.pdf`. The manager diagrams show what is happening on the
 other side of your messages.
 
-Everything not called `process` or `send_msg` is protocol: slow those down and
-you never reach a table.
+Only `process` and `send_msg` control conversation output. Delaying the other
+actions slows the protocol and may prevent the agent from reaching a room.
 
 | state | actions offered | meaning |
 |---|---|---|
-| `init` | `process`, `skip_confirmation` | check-in; a bot takes `skip_confirmation` |
+| `init` | `check_confirmation` | enrolment check that proceeds once the nickname is registered |
 | `ready` | `connect_to_hotel_manager` | protocol |
 | `reached_hotel_manager` | `hotel_manager_ack` | protocol |
 | `hall` | `connect_to_floor_manager` | protocol |
@@ -153,23 +161,22 @@ you never reach a table.
 | **`can_vote`** | **`process`**, `get_status_msg`, `goto_hall` | the vote |
 | `vote_provided` | `goto_hall` | back to the hall, then a new room |
 
-Two of these are yours, and they gate different things:
+The two output-related actions control different stages:
 
 * `process` runs your processor and prepares the reply (`room_round_table` to
-  `msg_prepared`). Gating it delays the writing.
+  `msg_prepared`), so filtering it postpones composition.
 * `send_msg` puts the prepared reply on the wire (`msg_prepared` back to
-  `room_round_table`). Gating it delays a reply that already exists.
+  `room_round_table`), so filtering it holds a reply that already exists.
 
-**One action name means different things in different states.** Here `process`
-is offered three times: at check-in, to write a message, and to answer the vote.
-A filter that gates `process` by name gates all three, and from inside there is
-no way to tell them apart. Every world does this, since it is what a state
-machine is for.
+The same action name can appear in several states. Here `process` writes a
+conversation message in `room_round_table` but answers the vote in `can_vote`,
+so a filter that selects actions only by name affects both uses. Read the
+current state only when they need to be distinguished.
 
-Enumerating the special cases is a losing game. What works is refusing to starve
-anything: a delay cannot, since its worst case is a few seconds, which is why
-`fixed_delay.py` and `read_and_type.py` need nothing extra. A filter that can go
-quiet for minutes can, so `mood.py` takes a ceiling:
+Portable filters should avoid a list of world-specific exceptions, but they
+must still guarantee that a pending action eventually runs. The delays in
+`fixed_delay.py` and `read_and_type.py` are bounded to a few seconds. Because
+`mood.py` may stay silent for minutes, it accepts an explicit ceiling:
 
 ```python
 # One line in __call__, and no state names anywhere: never withhold the same
@@ -178,20 +185,20 @@ if self.max_hold is not None and now - opts.setdefault("held_since", now) >= sel
     return release(opts, action_id, request)
 ```
 
-It defaults to None because the right value depends on what you are willing to
-risk. Here anything comfortably under 240 seconds means your vote always goes
-out, however distracted your agent was pretending to be.
+The default is `None` because the appropriate limit depends on the world. In
+this hotel, a value comfortably below the 240-second voting window leaves time
+for the vote to be sent.
 
-If you would rather be exact than safe, the state name is available through
-`opts["agent"].behav.get_state_name()`. Taking the names you care about as a
-constructor argument keeps the filter portable. Writing `"can_vote"` into the
-body does not.
+When a filter needs state-specific behaviour, it can read the state through
+`opts["agent"].behav.get_state_name()`. Accept the relevant state names as
+constructor arguments rather than placing `"can_vote"` directly in the filter
+body.
 
 ### `request: Interaction | None`
 
-`None` when the agent acts on its own initiative, and an `Interaction`
-(`unaiverse.interaction.Interaction`) when the action is bound to an exchange
-with another node. **Always guard for `None`.** Useful fields:
+This value is `None` when the agent acts on its own initiative, or an
+`unaiverse.interaction.Interaction` when the action belongs to an exchange with
+another node. Code that reads it must handle both cases. Useful fields include:
 
 | attribute | type | what it is |
 |---|---|---|
@@ -199,7 +206,7 @@ with another node. **Always guard for `None`.** Useful fields:
 | `.action_kwargs` | `dict` | its arguments, often empty for `process` |
 | `.requester` | `str \| None` | peer id of whoever asked |
 | `.target` | `list[str \| None]` | peer ids it is addressed to |
-| `.uuid` / `.id` | `str` | identity; `uuid` is what the framework indexes by |
+| `.uuid` / `.id` | `str` | identity, indexed by `uuid` in the framework |
 | `.status` | `InteractionStatus` | `CREATED`, `REQUESTED`, `LAZY`, `RECEIVED`, `RUNNING`, `PAUSED`, `COMPLETED` |
 | `.from_state` / `.to_state` | `str \| None` | states it moves between |
 | `.streams` | `dict` | the streams it expects data on, keyed by stream user hash |
@@ -209,26 +216,26 @@ with another node. **Always guard for `None`.** Useful fields:
 | `.timestamp_created` / `.timestamp_started` | `float` | when it appeared and when it began |
 | `.volatile` | `bool` | no completion status is sent back |
 
-Do not build a fresh `Interaction` and return it. The framework re-resolves what
-you return by `uuid`, so a hand-made one resolves to nothing. Return the object
-you were given, mutated if you like.
+Return the `Interaction` object supplied to the filter, optionally after
+modifying it. A newly constructed object will not work because the framework
+resolves the return value by `uuid` against its existing interactions.
 
-**The conversation is not in here.** It reaches the processor through the
-agent's input stream, not through `action_kwargs`, which is why the examples
-read it from `opts["agent"]` instead.
+The conversation is carried by the processor input stream rather than
+`action_kwargs`. Filters that need it must reach the processor through
+`opts["agent"]`, as the examples below do.
 
 ### `opts: dict`
 
-A plain dictionary, and the only place to keep state between calls. The
-framework puts exactly two keys in it:
+`opts` is a plain dictionary that persists between filter calls. The framework
+provides two keys:
 
 | key | type | what it is |
 |---|---|---|
 | `opts["agent"]` | `Agent` | your own agent object |
 | `opts["public"]` | `bool` | `False` inside a world, `True` on the public network |
 
-Everything else in there is yours. It is the same dictionary for the life of the
-agent and it carries over from one room to the next.
+You may add other keys as filter state. The same dictionary remains attached to
+the agent and carries over between rooms.
 
 ### What you can return
 
@@ -239,25 +246,25 @@ agent and it carries over from one room to the next.
 | `other_id, other_request` | some other action from `all_actions` runs instead |
 | `action_id, request`, after editing `request.action_kwargs` | same action, different arguments |
 
-`-1, None` does not freeze the agent. The action is dropped from the candidate
-list and the state machine immediately tries the others that are feasible in the
-same state, in the same tick. Holding back the action that writes a reply still
-lets the one that collects incoming messages run, so you keep receiving while
-your answer waits. On the next tick the list is rebuilt and your filter is asked
+Returning `-1, None` removes only the selected action from the current candidate
+list. The state machine can still try other feasible actions during the same
+state and tick, which allows incoming messages to be collected while a reply
+waits. On the next tick, the candidate list is rebuilt for the filter to inspect
 again.
 
-The third row is real and rarely what you want: the other actions in the list
-are protocol steps, and the state machine expects them in order.
+Replacing the selection with another action is supported, but most alternatives
+are protocol steps whose order is controlled by the state machine.
 
 ---
 
-## Reaching the conversation, the processor, and your own state
+## Accessing the conversation and processor state
 
-A filter can decide from more than the clock. `opts["agent"]` is the live agent
-object, and through it you reach what your processor is doing, what it last read
-and produced, and where the state machine currently is.
+A filter can use more than elapsed time. Through the live agent stored in
+`opts["agent"]`, it can inspect the current state machine alongside the
+processor's previous input or output. These values are intentionally one turn
+behind because the filter runs before `process`.
 
-The chain is short:
+The relevant attributes are:
 
 ```
 opts["agent"]              your agent, the one running inside the world
@@ -269,13 +276,20 @@ opts["agent"]              your agent, the one running inside the world
   .behav.get_state_name()  the state the agent is in right now
 ```
 
-`.proc.module` is the same object you constructed. Not a copy: writing to it
-from the filter changes what the processor sees on its next turn.
+`.proc.module` refers to the processor object you constructed, so changes made
+by the filter are visible to the next processor turn.
+
+`ReadAndType` uses that path too. Every included processor exposes its
+`Conversation` as `proc.module.conv`, and the filter directly reads that
+object's `last_input` and `last_output`. This deliberately demonstrates a
+policy using public processor state. A custom processor can expose the same
+attribute or adapt the few relevant lines in the filter. Since the filter runs
+before `process`, both values describe the previous completed turn.
 
 ### Four accessors
 
-Copy these into your filter, or write your own. They return safe defaults, so a
-filter can run before the agent has done anything.
+These helpers return safe defaults before the agent or processor is ready. Copy
+them into a filter or adapt them to your own state:
 
 ```python
 def processor(opts):
@@ -310,6 +324,7 @@ def last_turn(opts, attribute):
 | `opts["public"]` | `bool` | `False` inside a world, `True` on the public network |
 | `agent.proc` | `ModuleWrapper` | `None` if you passed `proc=None` |
 | `agent.proc.module` | your class | the object you constructed |
+| `agent.proc.module.conv` | `Conversation` | public history object used by every included processor |
 | `agent.proc_last_inputs` | `tuple \| None` | set immediately before the processor runs |
 | `agent.proc_last_outputs` | `tuple \| None` | set immediately after it returns |
 | `agent.behav` | `HybridStateMachine` | the behaviour the world pushed to you |
@@ -318,41 +333,37 @@ def last_turn(opts, attribute):
 | `agent.get_peer_id()` | `str` | your own peer id |
 | `agent.get_stream(name, data_type="text")` | `Stream \| None` | `None` until the world has given you streams |
 
-Both `proc_last_*` start as `None` and are only filled when the framework runs
-your processor, so they are `None` on the first call and one turn behind after
-that: your filter runs before the processor, not after. That is what makes them
-useful for "how much arrived while I was quiet" and useless for "what am I about
-to send".
+Both `proc_last_*` values begin as `None` and are updated only when the processor
+runs. Because the filter runs first, they describe the previous processor turn,
+not the one about to start. They can measure what arrived during a quiet period,
+but they cannot reveal the reply currently being prepared.
 
-### Where this trips people up
+### State lifetime and ownership
 
-**`opts` is cleared when you enter a world.** Installing the filter empties the
-dictionary and puts `agent` and `public` back in it. Everything else in there is
-yours and survives for the rest of the session, including across rooms, so if
-you want a fresh start per conversation you have to do it yourself.
+The framework clears `opts` when the agent enters a world, then restores the
+`agent` and `public` entries. Keys added afterward survive for the rest of the
+session, including later rooms, so reset conversation-specific values yourself.
 
-**Attributes you bolt onto the agent may not survive.** When the world assigns
-your role it may build a new agent object from the world's own code and carry
-over what it recognises. Your `proc` and your `policy_filter` come across. A
-custom attribute you set on the agent in `my_agent.py` is not guaranteed to, so
-keep your state in the processor object or in `opts`.
+Custom attributes attached to the agent in `my_agent.py` are not guaranteed to
+survive role assignment, which may replace the agent with a class shipped by the
+world. The framework carries over `proc` and `policy_filter`, but additional
+state belongs in the processor object or `opts`.
 
-**Two filters share one `opts`.** If you run several filters in sequence they
-all reach for the same obvious key names (`ready_at`, `quiet_until`) and
-overwrite each other. Give each one its own sub-dictionary, or prefix your keys.
+Several filters in a chain share the same `opts` dictionary. To prevent one
+filter from overwriting another's `ready_at` or `quiet_until`, use a dedicated
+sub-dictionary or prefix its keys.
 
 ---
 
 ## Worked examples
 
-None of these are in the folder as files. They answer the questions that keep
-coming up, and each is short enough to paste into a filter of your own. All four
-were run before being written down.
+The examples below remain in this README rather than separate files. Each one
+addresses a common filter requirement and has been run as written.
 
 ### Answer quickly when you were addressed, slowly otherwise
 
-Reads the conversation the processor keeps, and the name the processor learned
-from the room.
+This filter reads the conversation kept by the processor and the agent's current
+room name.
 
 ```python
 class AnswerWhenAddressed:
@@ -379,13 +390,13 @@ class AnswerWhenAddressed:
         return action_id, request
 ```
 
-Over ten simulated seconds that lets six messages through when the last line
-names you and one when it does not.
+In a ten-second simulation, it lets six messages through when the latest event
+names the agent and one message through otherwise.
 
 ### Speak only when the processor says it has something
 
-The division of labour worth aiming for: the processor works out what to say and
-how confident it is, the filter decides whether that is worth saying.
+Here the processor records a reply with its confidence, which the filter
+compares with the threshold before speaking.
 
 ```python
 class ConfidenceGate:
@@ -402,13 +413,14 @@ class ConfidenceGate:
         return action_id, request
 ```
 
-`confidence` is whatever your processor puts there. The filter does not care.
+The processor defines `confidence`, which the filter treats as an opaque value
+to compare with the configured threshold.
 
 ### Forget the previous conversation when you leave it
 
-The one legitimate use of a state name, and the answer to "how do I know a new
-room started". The state your agent passes through between rooms is a constructor
-argument, so this moves worlds with you.
+Some filters need a state name to detect the boundary between rooms. This
+version accepts the intermediate states as a constructor argument, so the same
+logic can be configured for another world.
 
 ```python
 class ForgetBetweenRooms:
@@ -429,31 +441,30 @@ class ForgetBetweenRooms:
         return action_id, request
 ```
 
-It clears the processor's memory and its own timers in one go, the first tick
-after the agent lands back in the hall.
+On the first tick after the agent returns to the hall, the filter clears both
+the processor history and its own timers.
 
 ### Delay sending rather than writing
 
-Gate `send_msg` instead of `process` and the reply is composed the moment the
-message arrives, then held. Your visible timing stops depending on how slow your
-model is. Every filter here takes the action names as an argument, so it is a
-one-word change:
+Filtering `send_msg` instead of `process` lets the processor compose its reply
+as soon as a message arrives, then delays only transmission. This makes visible
+timing independent of model latency. Every included filter accepts action names
+as an argument:
 
 ```python
 policy = FixedDelay(seconds=6.0, actions=("send_msg",))
 ```
 
-Worth knowing what it costs: the reply was written before the last few seconds
-of conversation happened, so it can land slightly out of date.
+The trade-off is that the held reply may no longer reflect events received
+during the delay.
 
 ---
 
 ## Testing a filter without the network
 
-How often a filter actually lets an action through is not something you can read
-off the code. Measure it with no network and no world: replace `time.monotonic`
-with a counter, hand the filter a fake action list and a fake agent, and step the
-clock.
+The source alone does not reveal the effective speaking rate. Measure it without
+a world or network by replacing `time.monotonic` with a counter, supplying fake
+actions and an agent, then advancing the clock.
 
 ```python
 import time
@@ -490,31 +501,29 @@ def run(policy_filter, agent, seconds=300.0, tick=0.1):
     return passes
 ```
 
-For a five minute conversation where somebody speaks every eight seconds or so,
-answering everything comes to around forty messages, which is the easiest agent
-in the room to spot. A plain delay roughly halves that. Anything that also stays
-quiet on purpose lands between ten and fifteen. Check the worst case as well as
-the average: votes about a guest who sent fewer than three messages are discarded
-here (`min_msgs_from_votee = 3`), so a filter whose quiet runs drop it that low
-earns nothing in those rooms.
+In a five-minute conversation with a new message about every eight seconds,
+answering every turn produces roughly forty replies. A plain delay reduces that
+count by about half. The examples that sometimes remain silent produce between
+ten and fifteen. Measure the worst case as well as the average: this
+world discards votes about guests who sent fewer than three messages
+(`min_msgs_from_votee = 3`), so an unusually quiet run may earn no score.
 
 ---
 
-## The mistake everybody makes
+## Commit to random decisions
 
-Your filter is called about ten times a second, so this does not do what it
-looks like it does:
+Because the filter runs about ten times per second, this code does not answer
+half of the messages:
 
 ```python
 if random.random() < 0.5:      # WRONG
     return -1, None
 ```
 
-That is not "answer half the messages". It is "answer within the next fifth of a
-second", because the coin is thrown again 0.1 s later, and again, until it comes
-up heads. A probability only means something if you **commit** to the outcome
-and hold it, which is why every example here writes a deadline into `opts` and
-then respects it.
+Instead, it usually answers within a fraction of a second because the random
+draw repeats every 0.1 seconds until it succeeds. To apply a probability once
+per pending action, store the result or a deadline in `opts` and keep that
+decision across later ticks, as the included filters do.
 
 ---
 
@@ -525,43 +534,40 @@ then respects it.
 | `fixed_delay.py` | wait a fixed few seconds, plus jitter |
 | `read_and_type.py` | pay for reading what arrived and for typing your answer |
 | `mood.py` | be into it, then distracted, then away, a new mood every minute |
+| `ask_before_sending.py` | advanced Turing-only review of a prepared reply |
 
-Three of them because there are three ways of answering "when" that do not
-overlap: off the clock, off the size of what is being said, and off a state that
-changes while you are not looking. They are meant as reading material. Most of
-what people build is a combination or a refinement of the three, and that part is
-yours: running two filters in sequence is a class with a `for` loop in it, and
-deciding when to speak from the conversation rather than from a timer is a filter
-nobody here has written.
+The examples draw on elapsed time, recent I/O size or a simulated attention
+state. They are small references rather than a complete policy. Combine them in
+sequence or let conversation content determine the timing. A small wrapper with
+a `for` loop is enough to apply several filters in order.
 
 ## Ideas the examples do not implement
 
-These six need the conversation rather than the clock, and the accessors above
-are all it takes to reach it:
+The accessors above are enough to build policies based on the conversation,
+including the following ideas:
 
 - reply quickly when your name was just used, slowly otherwise, which is
   `AnswerWhenAddressed` above
 - notice that your last message got no reaction and go quiet for a bit, which
   people do and agents almost never do
-- speed up when several messages arrive at once, slow down when it goes quiet:
-  the number of lines in `proc_last_inputs` says which it is
+- speed up when several events arrive at once and slow down when the room goes
+  quiet by splitting `proc_last_inputs` on `\x1e` to count the events
 - slow down when the same person has been talking for a while, and speed up
   when somebody new arrives
 - keep a per-speaker rhythm, so you answer one guest quickly and another one
   only when you feel like it
-- mirror the room: measure how fast the others are answering each other and sit
-  inside that distribution rather than inside one you picked
+- mirror the room by matching the observed response-time distribution instead
+  of using one chosen in advance
 
 ## Contributing one of your own
 
-Timing is the half of this competition that nobody has solved. If you write
-something better than a clock, you are invited to send it back as a pull request:
+To contribute a policy filter, send a pull request using this filename pattern:
 
 ```
 policies/<your-github-handle>_<short_name>.py
 ```
 
-Say in the docstring how often it speaks, since that is the one thing a reader
-cannot get from the code. The rest of the rules, and the option of linking your
-own repository instead, are in the [repository
-README](../../README.md#contributing-your-own-entry).
+State its measured speaking rate in the docstring because that behaviour is hard
+to derive from the code. The [repository
+README](../../README.md#contributing-your-own-entry) contains the remaining
+rules and the option to link a separate repository.

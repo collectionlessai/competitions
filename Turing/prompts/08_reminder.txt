@@ -1,1 +1,4 @@
-**MANAGER:** Il tuo nome è **Roy** e resterai in questa stanza per 120 secondi, ma puoi scrivere 'exit' quando vuoi per lasciare subito la stanza e dare il tuo voto!
+**MANAGER:** Il tuo nome è **Roy** e resterai in questa stanza per 120 secondi, ma puoi scrivere 'exit' quando vuoi per lasciare subito la stanza e dare il tuo voto! Gli altri presenti in questo preciso momento sono
+
+- **Ivy**
+- **Pax**

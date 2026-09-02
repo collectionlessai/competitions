@@ -1,17 +1,15 @@
-"""ELIZA, 1966, in Italian
+"""An Italian adaptation of ELIZA, 1966.
 
-Regular expressions and a dice roll. The first rule in RULES whose pattern
-matches the last line wins, its answer is filled in with whatever the pattern
-captured, and when nothing matches, which is most lines, it picks one of the
-FALLBACK grunts instead. No model to load and nothing to install.
+The processor applies regular expressions to the latest event, selects an answer
+from the first matching rule and fills it with any captured text. Most events
+match no rule, in which case it chooses a short response from FALLBACK. It needs
+no model or extra package.
 
-Two things are easy to get wrong once you start editing the rules. Captured
-text goes through flip() before it is quoted back, so `mi sento come mio padre`
-can come back as `ti capita spesso di sentirti come tuo padre?` with the
-possessive pointing at the right person. Order matters too, since the list is
-read top to bottom and stops at the first hit. Move the last rule, the one that
-catches any question at all, up to the top and every question in the room comes
-back as one of its three shrugs, whatever was actually asked.
+Rule order matters because matching stops at the first hit. Captured text passes
+through flip() before being reused. For example, `mi sento come mio padre`
+becomes `ti capita spesso di sentirti come tuo padre?`, with the possessive
+changed as well. The final rule matches any question, so moving it earlier would
+hide the more specific question rules below it.
 """
 
 import re
@@ -41,17 +39,17 @@ RULES = [
     (r".*\?", ["perché me lo chiedi?", "boh, tu che dici?", "non saprei"]),
 ]
 
-# Applied to the captured group, never to the whole line.
+# Apply these substitutions only to captured groups.
 FLIP = {"io": "tu", "mi": "ti", "me": "te", "mio": "tuo", "mia": "tua",
         "miei": "tuoi", "mie": "tue", "sono": "sei", "ho": "hai",
         "tu": "io", "ti": "mi", "te": "me", "tuo": "mio", "tua": "mia",
         "sei": "sono", "hai": "ho"}
 
-# Where most lines end up.
+# Default replies for events that match no rule.
 FALLBACK = ["vai avanti", "mah", "in che senso?", "capito", "aspetta cosa",
             "eh", "boh"]
 
-# For the first turn of a room, when there is no line to answer.
+# Greetings used before another guest has spoken.
 OPENERS = ["ciao", "buonasera", "ehi c'è nessuno", "ciao a tutti"]
 
 
@@ -63,12 +61,12 @@ class Eliza(torch.nn.Module):
 
     def __init__(self, seed: int | None = None):
         super().__init__()
-        self.rng = random.Random(seed)  # pass a seed to get the same room twice
+        self.rng = random.Random(seed)  # A seed makes response choices repeatable.
         self.rules = [(re.compile(pattern, re.I), answers) for pattern, answers in RULES]
         self.conv = Conversation()
 
     def reply(self, text: str) -> str:
-        """One line in, one line out. Nothing here reads the history."""
+        """Produce one reply from an event without consulting older history."""
         for pattern, answers in self.rules:
             match = pattern.match(text.strip())
             if match:
@@ -77,11 +75,28 @@ class Eliza(torch.nn.Module):
         return self.rng.choice(FALLBACK)
 
     def forward(self, sample: str) -> str:
-        # The whole history goes in and only the bottom line comes back out.
-        # A rule that wanted context would read self.conv.history itself.
+        # The current rules inspect only the latest remote event. A contextual
+        # rule can read self.conv.history instead.
         self.conv.add(sample)
 
-        heard = self.conv.last_message()   # None until somebody speaks
+        heard = self.conv.last_message()   # None before another guest speaks.
         reply = self.reply(heard.text) if heard else self.rng.choice(OPENERS)
         self.conv.remember(reply)
         return reply
+
+
+def main() -> None:
+    """Run a small terminal conversation for testing the processor."""
+    eliza = Eliza()
+    print("Eliza is ready. Press Ctrl-D or Ctrl-C to stop.")
+    try:
+        while True:
+            text = input("you> ").strip()
+            if text:
+                print(f"eliza> {eliza(f'**you:** {text}')}")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
+if __name__ == "__main__":
+    main()

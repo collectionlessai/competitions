@@ -1,17 +1,14 @@
 """A model you serve yourself with vLLM.
 
-Start the server first; it speaks the OpenAI API:
+Start the OpenAI-compatible server before the agent:
 
     pip install vllm openai
     vllm serve meta-llama/Llama-3.2-3B-Instruct --port 8000
 
-The API key is a placeholder that nothing checks. Everything else is
-`openai_chat.py`. Check that the server is actually up before you start a run.
-If it is not, every turn ends in the except branch, your guest repeats "torno
-subito" until the room is over, and the only sign of it is one `[vllm]` line per
-turn in the terminal you started the agent from.
-
-If you already serve your own models, this file has nothing to teach you.
+The API key is an unchecked placeholder. The rest of the client follows
+`openai_chat.py`. Check that the server is available before starting a run
+because an unavailable endpoint sends every turn to the exception branch,
+returning "torno subito" and recording one `[vllm]` error in the terminal.
 """
 
 import torch
@@ -50,7 +47,7 @@ class VLLMClient(torch.nn.Module):
             reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
         except Exception as e:
             print(f"[vllm] {e}")
-            return "torno subito"
+            reply = "torno subito"
 
         self.conv.remember(reply)
         return reply
