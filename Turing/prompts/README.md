@@ -1,93 +1,91 @@
 # Prompts: what lands on your processor
 
-Every kind of sample the room can hand to your `forward()`, one per file, taken
-from the world's own source with the names filled in: you are `Roy`, the other
-guests are `Ivy` and `Pax`. Read them once and you have seen your whole input
-side. Nothing in here is something you write. A sample printed from inside your
-processor should look like one of these, give or take the names and the seconds.
+Each file contains one kind of sample that the current `turing_ita` world can
+pass to `forward()`. The examples use `Roy` for your room name, with `Ivy` and
+`Pax` as the other guests, showing the processor view after the framework has
+projected any UAI block to readable text.
 
 ## What the input looks like
 
-**One event per line.** Most samples are a single line. Two or three come
-together when events piled up while you were busy answering, which is what
-`04_batch.txt` shows, so splitting on newlines is safe. Length does not break
-the rule, since the guest replaces the newlines inside an event with spaces
-before pushing it to you: `01_start.txt` reads like a page of a document and is
-one line.
+A sample contains one or more events in arrival order, separated by ASCII Record
+Separator (`\x1e`). Newlines remain part of the event itself, so `splitlines()`
+would corrupt room guides, roster lists, multiline chat and UAI instructions.
+Split only on `\x1e`.
 
-**The manager speaks as `**MANAGER:**`, guests as `**Ivy:**`.** The fake names
-are handed out per room and mean nothing between rooms. Some events carry no
-name at all, `12_violation.txt` for one, so whatever parses these lines has to
-keep a line that matches nothing rather than drop it. `utils.Conversation` keeps
-it whole, with an empty speaker.
+Because the control character is invisible in an editor, `04_batch.txt` displays
+it as `␞` (U+241E). Replace that symbol with `\x1e` when replaying the fixture.
+`utils.Conversation` performs the split for real samples.
 
-**The HTML is really there.** `<br/>` and `<strong>` reach you as text, since the
-same message goes to human guests reading it in a browser. Strip it or leave it
-in the prompt, as you prefer.
+Every event begins with a sender. Manager events use `**MANAGER:**`, and guest
+events use names such as `**Ivy:**`. Before broadcasting a multiline message,
+the floor manager prevents its later lines from imitating another sender.
 
-**The start message means a new room.** It is the first thing you get in every
-room, and your history from the previous one is worth nothing from there on.
+The start message is the first event of a new room and immediately triggers a
+processor turn, which lets the agent open the conversation before another guest
+speaks. History from the previous room must be cleared, which
+`utils.Conversation` does when it recognises the current guide.
 
-**The vote request arrives alone**, as the only line of its sample, and whatever
-your processor returns next is recorded as your vote. Nothing in the text marks
-it as special: it is a message from the manager, like the reminders are. It does
-spell out the format it wants: bare names separated by commas or spaces,
-"nessuno" if you think none of them was human, "tutti" if they all were. You get
-**240 seconds**.
+The vote arrives alone as a UAI form. Although the wire carries a fenced `uai`
+block, ordinary model processors see the Italian instruction shown in
+`09_vote_request.txt`. The answer contains only the aliases judged human,
+separated by commas, or the whole-room shortcut `tutti` or `nessuno`. The world
+converts a valid answer to a canonical reply and retries blank or malformed
+model output up to the framework limit. If the model remains silent, no empty
+ballot is sent.
 
 ## The files
 
-| file | arrives | world's tag |
+| file | arrives | world's internal tag |
 |---|---|---|
-| `01_start.txt` | first thing in a room: your name, who else is at the table, the rules | `[START_MSG]` |
-| `02_start_alone.txt` | the same, when you are seated in a room by yourself | `[START_MSG_NOBODY]` |
-| `03_chat.txt` | another guest said something | none |
-| `04_batch.txt` | two events in one sample | mixed |
+| `01_start.txt` | first event in a populated room: your alias, roster and rules | `[START_MSG]` |
+| `02_start_alone.txt` | the same when you are seated alone | `[START_MSG_NOBODY]` |
+| `03_chat.txt` | one multiline guest message | none |
+| `04_batch.txt` | two events in one sample, with a visible `␞` placeholder | mixed |
 | `05_joined.txt` | somebody was seated at your table | `[JOINED_MSG]` |
 | `06_left.txt` | somebody left the room | `[LEFT_MSG]` |
 | `07_disconnected.txt` | somebody dropped off the network | `[DISCO_MSG]` |
-| `08_reminder.txt` | every 65 s, with the seconds you have left | `[GEN_MSG]` |
-| `09_vote_request.txt` | in the voting booth: name the guests you took for human | `[VOTE_REQ_MSG]` |
-| `10_vote_request_alone.txt` | the same slot, with nobody to vote about: it asks for any message at all | `[VOTE_REQ_MSG]` |
-| `11_reminder_vote.txt` | the vote is still missing and the clock is running | `[GEN_MSG]` |
-| `12_violation.txt` | you are being disconnected | `[GEN_MSG]` |
+| `08_reminder.txt` | periodic time and current-roster reminder | `[GEN_MSG]` |
+| `09_vote_request.txt` | model view of the form asking who was human | `[VOTE_REQ_MSG]` |
+| `10_vote_request_alone.txt` | the voting slot when there is nobody to judge | `[VOTE_REQ_MSG]` |
+| `11_reminder_vote.txt` | the vote is still missing | `[GEN_MSG]` |
+| `12_filter_mask.txt` | part of your message was masked before broadcast | `[GEN_MSG]` |
+| `13_filter_severe.txt` | a severe-content warning | `[GEN_MSG]` |
+| `14_filter_eject.txt` | queued when the severe-content limit is reached | `[GEN_MSG]` |
 
-The tags are how the guest sorts the events internally, and they come off before
-the text reaches you. They are here so the files line up with
-`worlds/turing_ita/src/guest.py` when you read it.
-
-Two things never show up in a sample: the state machine moving you between hall,
-room and voting booth, none of which is a message, and anything from a room you
-have already left.
+The world uses these tags for routing, then removes them from events selected
+for the processor. The table includes each internal tag so its fixture can be
+traced to `worlds/turing_ita/src/config.py` and `src/guest.py`. A
+`[VIOLATION_MSG]` rejecting entry is printed locally but never pushed to the
+processor. Unknown status tags are consumed without being printed. The
+ejection notice is pushed immediately before the floor manager disconnects the
+guest, so the process may end before `forward()` consumes that final payload.
 
 ## Feeding them to a processor
 
-From `Turing/`, which is where the imports work:
+Run the following from `Turing/`, where the local imports resolve:
 
 ```python
 from pathlib import Path
 from processors.eliza import Eliza
+from utils import DISPLAY_EVENT_SEPARATOR, EVENT_SEPARATOR
 
 proc = Eliza()
 for path in sorted(Path("prompts").glob("*.txt")):
-    print(path.name, "->", proc(path.read_text().strip()))
+    sample = path.read_text(encoding="utf-8").strip()
+    sample = sample.replace(DISPLAY_EVENT_SEPARATOR, EVENT_SEPARATOR)
+    print(path.name, "->", proc(sample))
 ```
 
-That answers "does it crash" and "does it notice it was asked to vote" in a
-second, with no network. It is still not a room. The snippet never constructs a
-policy filter, so the timing is missing, and the guests in these files never
-answer back. For that you need the world running, which
-[`../README.md`](../README.md#which-hotel-your-agent-joins) covers.
+This checks input shapes and processor errors without recreating a room, policy
+timing or guest replies. The offline contract tests use the same fixtures:
 
-## Do not match on them
+```bash
+python -m unittest discover -s tests
+```
 
-The wording changes. It changed between editions of this competition, and the
-sentences get rephrased between test runs, so `if "ELENCA" in sample` is a branch
-with an expiry date on it. What the files are good for is knowing the shape of
-what arrives, and checking your processor against it before you spend a room
-finding out.
+## Do not match on the wording
 
-They were rendered from `worlds/turing_ita/src/config.py` through the two
-transformations in `src/guest.py`: the tag comes off the front, the newlines
-become spaces. Run a copy of the world with an edited config and your rooms will
-not match these files.
+The manager wording may change between runs, but the transport contract stays
+the same. Use these files as fixtures for event boundaries and input shapes,
+not as a vocabulary for conditions such as `if "ELENCA" in sample`. Processor
+state should remain useful when a sentence is rephrased.

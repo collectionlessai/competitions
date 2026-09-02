@@ -1,20 +1,19 @@
-"""Delay proportional to how much you had to read and how much you wrote.
+"""Estimate a delay from message length, a thinking pause, then typing time.
 
-A long message takes longer to answer than a short one, and a long answer takes
-longer to type, so instead of one delay this charges for three things:
+The delay combines three estimates, so longer inputs or replies take more time
+than short ones:
 
     reading  = characters that arrived since your last turn / reading speed
     thinking = a random pause
     typing   = length of what you wrote / typing speed
 
-The numbers come off the agent itself, through opts["agent"], which the
-framework fills in. proc_last_inputs is what the processor read on its last
-turn, and since the world only sends what is new, its length is the reading time
-and there is nothing to keep track of between calls.
+The pending processor input is read non-destructively from the agent's input
+stream. The framework exposes the previous processor output through
+opts["agent"], which provides the typing estimate for the next turn.
 
-Your reply does not exist yet when the filter runs, since the filter runs before
-the processor. So the typing cost lands on the previous reply rather than on the
-one about to go out, which over a conversation comes to the same thing.
+Because the filter runs before the processor, the next reply does not exist yet.
+The typing estimate therefore uses the previous reply. This shifts only that
+component by one turn but retains its contribution over a conversation.
 """
 
 import time
@@ -22,10 +21,10 @@ import random
 
 
 def last_turn(opts, attribute: str) -> str:
-    """Read proc_last_inputs or proc_last_outputs off the agent, as a string.
+    """Read proc_last_inputs or proc_last_outputs as a string.
 
-    Both are tuples, and both are None until the processor has run once, so the
-    first call gets "" instead of an exception.
+    Both values are tuples and remain None until the first processor turn. In
+    either case, return an empty string when no text is available.
     """
     value = getattr(opts.get("agent"), attribute, None)
     if isinstance(value, (list, tuple)):
@@ -33,13 +32,44 @@ def last_turn(opts, attribute: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def pending_input(opts, request, action, requested_by: str) -> str:
+    """Return the text waiting for this process action without consuming it.
+
+    Stream reads are deduplicated per requester, so this policy uses its own
+    requester name and does not interfere with Agent.process. UAI input is
+    projected through the same callback that the processor wrapper uses.
+    """
+    agent = opts.get("agent")
+    get_stream = getattr(agent, "get_stream", None)
+    if not callable(get_stream):
+        return last_turn(opts, "proc_last_inputs")
+
+    stream = get_stream("processor_in", data_type="text")
+    if stream is None:
+        return last_turn(opts, "proc_last_inputs")
+
+    interaction = request if request is not None else getattr(action, "system_interaction", None)
+    uuid = getattr(interaction, "uuid", None)
+    sample = stream.get(requested_by=requested_by, uuid=uuid)
+    if not isinstance(sample, str):
+        return last_turn(opts, "proc_last_inputs")
+
+    project = getattr(agent, "uai_preprocess", None)
+    if callable(project):
+        try:
+            sample, _ = project(sample)
+        except Exception:
+            pass
+    return sample
+
+
 class ReadAndType:
 
     def __init__(self, read_cps: float = 25.0, type_cps: float = 6.0, think: float = 2.0,
                  actions=("process",)):
-        self.read_cps = read_cps      # characters per second, reading
-        self.type_cps = type_cps      # characters per second, typing
-        self.think = think            # mean of the extra random pause, 0 to skip it
+        self.read_cps = read_cps      # Reading speed in characters per second.
+        self.type_cps = type_cps      # Typing speed in characters per second.
+        self.think = think            # Mean random pause, or 0 to disable it.
         self.actions = set(actions)
 
     def __call__(self, action_id, request, all_actions, opts):
@@ -49,13 +79,15 @@ class ReadAndType:
         now = time.monotonic()
 
         if "ready_at" not in opts:
-            fresh = len(last_turn(opts, "proc_last_inputs"))
+            action = all_actions[action_id]
+            current_input = pending_input(opts, request, action, f"ReadAndType:{id(self)}")
+            fresh = len(current_input)
             thinking = random.expovariate(1.0 / self.think) if self.think > 0 else 0.0
             delay = (fresh / self.read_cps
                      + thinking
                      + len(last_turn(opts, "proc_last_outputs")) / self.type_cps)
 
-            # The cap stops a long backlog pushing the reply arbitrarily far out
+            # Cap the delay so a long backlog cannot postpone the reply indefinitely.
             opts["ready_at"] = now + min(delay, 45.0)
 
         if now < opts["ready_at"]:

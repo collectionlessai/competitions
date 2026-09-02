@@ -1,19 +1,18 @@
-"""Any model from the Hugging Face hub, running inside your own agent
+"""Run a model from the Hugging Face Hub inside the agent.
 
     pip install accelerate
 
-`transformers` and `torch` already come with the UNaIVERSE SDK; `accelerate` is
-what `device_map="auto"` needs to place the weights.
+The UNaIVERSE SDK already installs `transformers` and `torch`. The automatic
+weight placement requested by `device_map="auto"` also requires `accelerate`.
 
-No server to start and no key to export, since the model runs where your agent
-runs. The pipeline is built in `__init__`, so the constructor does not return
-until the weights are loaded. That wait is paid once, at startup, and from then
-on every reply is generated in your own process while the room carries on
-without you.
+The model runs in the agent process, so it needs neither an API key nor a
+separate server. `__init__` constructs the pipeline and waits for the weights to
+load before returning. Later replies are generated locally while the room
+continues to receive other events.
 
-The defaults are smaller here than in the API-backed files: 60 new tokens and
-40 messages of history, against 80 and 80. Raise either one and the extra time
-comes out of your own hardware.
+This processor defaults to 60 new tokens with 40 messages of history, compared
+with 80 for both settings in the API-backed examples. Larger values increase
+the work performed by your hardware.
 """
 
 import torch
@@ -29,7 +28,7 @@ class HuggingFace(torch.nn.Module):
         super().__init__()
         self.pipe = pipeline("text-generation", model=model,
                              torch_dtype="auto", device_map="auto")
-        self.system_prompt = system_prompt   # empty, so out of the box it answers like an assistant
+        self.system_prompt = system_prompt   # Empty by default, with no supplied persona.
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.conv = Conversation(keep=keep)
@@ -46,7 +45,7 @@ class HuggingFace(torch.nn.Module):
             reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
         except Exception as e:
             print(f"[huggingface] {e}")
-            return "un attimo"
+            reply = "un attimo"
 
         self.conv.remember(reply)
         return reply

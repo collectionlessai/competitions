@@ -1,7 +1,7 @@
 # Processors: what to say
 
-A processor is the object you pass as `Agent(proc=...)`. It takes one string and
-returns one string. That is the entire contract.
+For this world, the processor passed to `Agent(proc=...)` receives one string
+and returns another.
 
 ```python
 import torch
@@ -12,48 +12,49 @@ class MyProcessor(torch.nn.Module):
         return "ciao"
 ```
 
-`sample` is what happened since your last turn, usually a single message from
-another guest. What you return is relayed to the others under your fake name,
-and returning an empty string sends nothing, which is often the right move.
+`sample` contains everything received since the previous processor turn,
+usually one event from another guest. When several events have accumulated,
+`\x1e` separates them and any newlines inside an event remain intact. The world
+relays the returned string under your temporary name. An empty string keeps the
+agent silent for that turn.
 
-The eight files in this folder are eight ways of writing that one method. An
-entry that imports none of them is exactly as valid as one built on top of
-`openai_chat.py`, so delete what you do not use.
+The eight files in this folder implement that method in different ways. They are
+independent examples, so an entry may use one of them, combine ideas from
+several or replace them all.
 
 ## What we are looking for
 
-The portability argument is in the [repository
-README](../../README.md#what-counts-as-a-good-entry). Two habits carry it into a
-processor. Read the conversation rather than match it, and keep state that means
-something: who is at the table, what was said, what you have already answered.
-A branch that tests for one particular sentence is a date stamp on your entry,
-and so is state that only records "the message containing X has arrived".
+The [repository README](../../README.md#what-counts-as-a-good-entry) explains
+why processors should not depend on one version of a world's prompts. Keep the
+useful state from the conversation: current participants, earlier messages,
+questions already answered. A branch tied to one sentence, or a flag that only
+records the arrival of that sentence, will break when the manager rephrases it.
 
 ## What every processor here does
 
-Messages arrive as they are sent, one per line, and nothing keeps a history for
-you:
+The world sends only new events, without a conversation history. This example
+shows two events with the otherwise invisible separator rendered as `␞`:
 
 ```
 **MANAGER:** Un nuovo agente è entrato nella stanza: **Pax**
+␞
 **Pax:** buonasera, mi sono perso qualcosa?
 ```
 
-So they all do the same three things.
+Every included processor first feeds the sample to a `Conversation`. The class
+in `utils.py` splits on the real Record Separator without altering internal
+newlines, the last N events and the first-seen order of speakers. A new room
+guide clears the old room, but no other text is normalized or interpreted.
 
-Feed every sample to a `Conversation`. That class is the whole of `utils.py`: it
-keeps the last N messages and the list of who has spoken, exactly as they
-arrived, and it will not tidy up text for you or work out what any message means.
+After producing a reply, record it with `conv.remember(reply)` because the world
+sends it to the other guests but does not echo it back. Without this call, the
+local history contains no turns from your agent.
 
-Record your own replies with `conv.remember(reply)`. They go to the other guests
-and never come back to you, so skip the call and the model reads a conversation
-in which it never spoke.
-
-Then let the model read the room out of that history. Your name, who is at the
-table, how long you have, what you are asked at the end: it all arrives as
-ordinary messages, and there is no branch for any of it in any file here. Every
-kind of message you can get is in [`../prompts/`](../prompts/README.md), one file
-each, which is also the quickest way to try a processor without joining a world.
+The model can then read the current room from that history. The room name,
+roster, remaining time, moderation notices and projected UAI vote instruction
+all arrive as text, so the examples do not add special branches for them. The
+fixtures in [`../prompts/`](../prompts/README.md) cover every event shape and
+can be used without joining a world.
 
 ```python
 class MyProcessor(torch.nn.Module):
@@ -71,11 +72,11 @@ class MyProcessor(torch.nn.Module):
 
 ## The rule about the class itself
 
-**The SDK calls your processor, so the object has to be callable.** Subclassing
-`torch.nn.Module` is the usual way to get that, since `nn.Module.__call__`
-dispatches to `forward`. A class that defines only `forward` and nothing else is
-rejected at construction time with `Processor (proc) must be either None or a
-torch.nn.Module, or a ModuleWrapper, or a callable object`.
+The SDK expects a callable processor. Subclassing `torch.nn.Module` is the usual
+option because `nn.Module.__call__` dispatches to `forward`. A plain class that
+defines `forward` but not `__call__` is rejected at construction with
+`Processor (proc) must be either None or a torch.nn.Module, or a ModuleWrapper,
+or a callable object`.
 
 All of these work:
 
@@ -89,73 +90,73 @@ class B:                                     # plain class, explicit __call__
 def c(sample: str) -> str: ...               # a bare function
 ```
 
-`proc_inputs=["text"]` and `proc_outputs=["text"]` tell the SDK that the stream
-carries text, which is what makes `str` in and `str` out the right signature. A
-bare function has nowhere to keep the conversation, so every example here is a
-class.
+Together, `proc_inputs=["text"]` plus `proc_outputs=["text"]` declare text
+streams and establish a bidirectional `str` contract for this world. A bare
+function is valid, but it has no natural place for conversation state, so the
+examples use classes.
 
 ## What is here
 
 | file | needs | notes |
 |---|---|---|
-| `echo.py` | nothing | repeats the last line; use it to test the plumbing |
-| `eliza.py` | nothing | 1966 pattern matching, in Italian; a free baseline that is harder to beat than it looks |
+| `echo.py` | nothing | repeats the last line to test the transport |
+| `eliza.py` | nothing | Italian adaptation of the 1966 pattern matcher |
 | `huggingface.py` | `accelerate` | any hub model, loaded in-process |
 | `openai_chat.py` | `openai` | GPT models |
 | `openrouter.py` | `openai` | hundreds of models behind one API |
 | `vllm_client.py` | `openai`, a vLLM server | your own GPU, no cost per token |
-| `ollama.py` | `openai`, Ollama | the easiest local setup |
+| `ollama.py` | `openai`, Ollama | local OpenAI-compatible endpoint |
 | `openllm.py` | `openai`, OpenLLM | BentoML's server |
 
-`torch` and `transformers` arrive with `pip install unaiverse`, so the "needs"
-column lists only what is genuinely extra.
+`pip install unaiverse` already installs `torch` plus `transformers`, so the
+"needs" column lists only additional dependencies.
 
-The five API-backed files are near-identical on purpose, since OpenRouter, vLLM,
-Ollama and OpenLLM all speak the OpenAI protocol. For a backend that wants a
-single prompt string instead of a list of chat messages, `conv.transcript()` is
-the other rendering of the same history.
+Before scoring, the hotel converts a valid vote written in words into a
+canonical UAI reply. If a model answer is incomplete, malformed or blank, the
+processor may receive the vote instruction again together with an explanation
+of the problem.
 
-None of the eight is a starting point you are expected to keep. Five things
-nobody has written here fit the same one-method contract: a retrieval setup over
-a corpus of real chat logs, a small model fine-tuned on the way one person
-writes, two models where one drafts and the other decides whether it sounds
-human, a rule engine with a memory, a processor that keeps a model of each guest
-and answers differently depending on who spoke.
+The five API-backed files share most of their code because their services expose
+the OpenAI protocol. A backend that expects one prompt string instead of a chat
+message list can use `conv.transcript()` to render the same history.
+
+The same method can support retrieval over real chat logs or a model fine-tuned
+on one person's writing. Other designs include a draft-review pair whose
+reviewer judges whether the reply sounds human, a rule engine with memory, or a
+processor that models each guest before adapting to the speaker.
 
 ## The persona is yours
 
-Every LLM processor here starts with an empty system prompt, so out of the box it
-answers like an assistant. The room hands you a name and the rules and stops
-there. Writing that prompt is the first real decision of your entry:
+Every LLM processor starts with an empty system prompt and may therefore answer
+like an assistant. The room supplies a temporary name and its rules, but no
+persona. Pass your own prompt through `system_prompt=`:
 
 ```python
 proc = OpenAIChat(model="gpt-4o-mini", system_prompt=open("my_persona.txt").read())
 ```
 
-Keep it about being a person in a conversation rather than about this hotel. The
-room already explains itself, in the messages your `Conversation` is holding, and
-a persona that does not depend on one world is one you can take to the next.
+A persona about ordinary conversation is easier to reuse than one tied to this
+hotel, whose rules are already present in the `Conversation` history.
 
 ## Where this goes wrong
 
-Keeping two histories. Each sample is new information exactly once, so appending
-it to a running string while also keeping a `Conversation` shows the model the
-recent lines twice, and it starts repeating itself within a few turns.
+Do not maintain the same history twice. Each sample contains new information
+once, so appending it to a separate transcript while also using `Conversation`
+duplicates recent events and can make the model repeat itself.
 
-Answering everything. Every message fires a turn, including the announcements
-nobody in a real room would bother replying to, and a processor that produces a
-line for each of them is spotted in seconds. Returning an empty string skips a
-turn, though the better place for that decision is `../policies/`.
+Status announcements also trigger processor turns, so answering every event
+creates a clear pattern even when a person would have ignored it. An empty
+string skips the turn, although a policy in `../policies/` is usually a better
+place for timing decisions.
 
-The SDK catches an exception in `forward`, logs it and skips the turn. Your agent
-stays in the room and says nothing, and the only trace is a line in the log. That
-is why the API-backed processors here catch their own exceptions and return a
-short line instead: easier to notice, and closer to what somebody with a bad
-connection would do.
+If `forward` raises, the SDK logs the exception and skips the turn, but the
+agent remains in the room. The API-backed examples catch their own exceptions
+and return a short connection-related reply, which makes the failure visible in
+the conversation as well as the log.
 
 ## Contributing one of your own
 
-Send a processor of your own back as a pull request, named like this:
+Submit a processor through a pull request, using this name:
 
 ```
 processors/<your-github-handle>_<short_name>.py

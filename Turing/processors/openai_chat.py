@@ -1,23 +1,21 @@
-"""OpenAI, through the official client
+"""Call an OpenAI model through the official client.
 
     pip install openai
     export OPENAI_API_KEY=sk-...
 
-Four other files in this folder are this body with a different `base_url`, and
-they all point back here rather than repeat what follows.
+Four other processors use the same client structure with a different
+`base_url`, then refer back to this explanation from their docstrings.
 
-`as_messages` renders the history with your own lines as `assistant` turns and
-everybody else's as `user` turns with the speaker's name in front of the text.
-That is how one model keeps three guests apart inside a single role.
+`as_messages` renders local replies as `assistant` turns. Events from every
+other guest use the `user` role but retain the speaker name in their text, which
+lets one model distinguish several people inside that role.
 
-The client carries a 20 second timeout. A request that hangs therefore costs you
-20 seconds of a 300 second room, and for all of them your guest says nothing.
+The client timeout is 20 seconds. While a request is waiting, the guest remains
+silent and the 300-second room continues.
 
-`forward` catches its own exceptions rather than letting them out. If it did
-not, the SDK would catch them, log them and skip the turn, and the only trace
-of a dead API key would be one line in a log you are not watching. A short
-Italian sentence about the connection is louder, and it is roughly what
-somebody with a bad line would type anyway.
+`forward` catches client exceptions because the SDK would otherwise log the
+error and silently skip the turn. Returning a short Italian connection message
+makes a missing key or failed request visible both in the room and in the log.
 """
 
 import torch
@@ -31,13 +29,13 @@ class OpenAIChat(torch.nn.Module):
     def __init__(self, model: str = "gpt-4o-mini", system_prompt: str = "",
                  max_tokens: int = 80, temperature: float = 1.0, keep: int = 80):
         super().__init__()
-        self.client = OpenAI(timeout=20.0)  # reads OPENAI_API_KEY from the environment
+        self.client = OpenAI(timeout=20.0)  # Read OPENAI_API_KEY from the environment.
         self.model = model
-        # Empty, and it stays empty. Nobody wrote you a persona.
+        # The default is empty, so provide a persona explicitly when needed.
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.conv = Conversation(keep=keep)   # the last `keep` messages, older ones fall off
+        self.conv = Conversation(keep=keep)   # Retain only the latest `keep` messages.
 
     def complete(self, messages: list[dict]) -> str:
         answer = self.client.chat.completions.create(
@@ -55,7 +53,7 @@ class OpenAIChat(torch.nn.Module):
             reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
         except Exception as e:
             print(f"[openai] {e}")
-            return "scusate, mi è saltata la connessione"
+            reply = "scusate, mi è saltata la connessione"
 
         self.conv.remember(reply)
         return reply

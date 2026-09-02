@@ -1,14 +1,14 @@
-"""Wait a few seconds before answering.
+"""Hold selected actions for a short, variable delay.
 
 The framework calls a policy filter every time the agent is about to start an
-action. Return the action unchanged and it runs; return (-1, None) and it is
-dropped for now, the state machine tries whatever else is available in the same
-state, and you get asked again on the next tick.
+action. An unchanged selection runs immediately, whereas (-1, None) removes it
+from the current candidate list. The state machine may then try another action
+before asking about the delayed one again on the next tick.
 
-Nobody types a reply in 40 ms, so this holds it back for a few seconds. The
-jitter is there because a constant delay is about as recognisable as none at
-all: four replies exactly 6.0 seconds apart stand out in a chat log. The draw
-here is uniform. A log-normal one would sit closer to how people actually react.
+The base delay prevents replies from appearing within a few milliseconds. A
+uniform random jitter avoids a fixed interval such as four replies exactly 6.0
+seconds apart, which would create another recognizable pattern. A log-normal
+draw would approximate human reaction times more closely.
 """
 
 import time
@@ -19,23 +19,23 @@ class FixedDelay:
 
     def __init__(self, seconds: float = 6.0, jitter: float = 2.0, actions=("process",)):
         self.seconds = seconds
-        self.jitter = jitter          # up to this much is added, uniformly
-        self.actions = set(actions)   # which action names to slow down
+        self.jitter = jitter          # Maximum extra delay from a uniform draw.
+        self.actions = set(actions)   # Action names to delay.
 
     def __call__(self, action_id, request, all_actions, opts):
-        # Only the named actions get paced. Slow down a protocol action and you
-        # never reach a table
+        # Delay only configured actions because protocol actions move the agent
+        # towards a room.
         if all_actions[action_id].name not in self.actions:
             return action_id, request
 
         now = time.monotonic()
 
-        # opts is ours to write into, and it is the same dictionary on every call
+        # opts persists across calls, so it can hold the current deadline.
         if "ready_at" not in opts:
             opts["ready_at"] = now + self.seconds + random.uniform(0, self.jitter)
 
         if now < opts["ready_at"]:
             return -1, None
 
-        del opts["ready_at"]  # so the next message gets its own delay
+        del opts["ready_at"]  # Draw a new delay for the next pending action.
         return action_id, request

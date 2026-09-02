@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+tests/
+!Turing/tests/
+!Turing/tests/*.py
 # C extensions
 *.so
 
