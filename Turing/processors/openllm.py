@@ -6,6 +6,9 @@
 BentoML's server listens on port 3000 and implements the OpenAI API. This client
 therefore follows `openai_chat.py`, but uses the 60-second timeout from
 `ollama.py`.
+
+It sends an optional `system` message followed by one neutral `user` message
+containing the labelled transcript.
 """
 
 import torch
@@ -38,9 +41,10 @@ class OpenLLM(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[openllm] {e}")
             reply = "un secondo"

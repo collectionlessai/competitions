@@ -9,6 +9,9 @@ The API key is an unchecked placeholder. The rest of the client follows
 `openai_chat.py`. Check that the server is available before starting a run
 because an unavailable endpoint sends every turn to the exception branch,
 returning "torno subito" and recording one `[vllm]` error in the terminal.
+
+It sends an optional `system` message followed by one neutral `user` message
+containing the labelled transcript.
 """
 
 import torch
@@ -42,9 +45,10 @@ class VLLMClient(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[vllm] {e}")
             reply = "torno subito"

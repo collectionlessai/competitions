@@ -441,8 +441,9 @@ class ForgetBetweenRooms:
         return action_id, request
 ```
 
-On the first tick after the agent returns to the hall, the filter clears both
-the processor history and its own timers.
+On the first tick after the agent returns to the hall, the filter clears the
+processor's rotating context slots and its own timers. The fixed first message
+remains available.
 
 ### Delay sending rather than writing
 

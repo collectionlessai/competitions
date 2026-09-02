@@ -6,9 +6,10 @@
 Four other processors use the same client structure with a different
 `base_url`, then refer back to this explanation from their docstrings.
 
-`as_messages` renders local replies as `assistant` turns. Events from every
-other guest use the `user` role but retain the speaker name in their text, which
-lets one model distinguish several people inside that role.
+`as_messages` sends the conversation as one neutral `user` message containing
+a labelled transcript. It does not assume that locally stored messages belong
+to the API's `assistant` role. Competitors may replace that neutral mapping with
+role-based turns when it fits their processor.
 
 The client timeout is 20 seconds. While a request is waiting, the guest remains
 silent and the 300-second room continues.
@@ -48,9 +49,10 @@ class OpenAIChat(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[openai] {e}")
             reply = "scusate, mi è saltata la connessione"

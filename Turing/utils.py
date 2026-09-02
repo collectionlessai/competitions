@@ -35,8 +35,23 @@ from collections import namedtuple
 EVENT_SEPARATOR = "\x1e"
 DISPLAY_EVENT_SEPARATOR = "␞"
 SPEAKER = r"^\*\*(.+?):\*\*\s?(.*)$"
-MANAGER_SPEAKER = "MANAGER"
-ROOM_START = r"^\*\*MANAGER:\*\*\s*Benvenuto/a,\s+ti chiami\s+\*\*"
+RESET_PHRASES = (
+    "nuova conversazione",
+    "cancella contesto",
+    "inizia una nuova chat",
+    "new conversation",
+    "clear context",
+    "start a new chat",
+)
+
+
+def reset_on_phrase(event: str) -> bool:
+    """Match the small Italian and English reset vocabulary."""
+    event = event.casefold()
+    return any(phrase in event for phrase in RESET_PHRASES)
+
+
+DEFAULT_RESET_RULES = (reset_on_phrase,)
 
 # speaker: sender name, or "" for an event with no name
 # text:    event body with surrounding whitespace removed
@@ -45,40 +60,42 @@ Message = namedtuple("Message", "speaker text mine")
 
 
 class Conversation:
-    """Store messages in arrival order, optionally capped by `keep`.
+    """Keep one fixed first message and a rotating tail of `keep - 1` messages.
 
     This retention policy is the starter kit's choice. It is not prescribed by
     the world, and competitors are free to implement conversation state in a
     different way, including by exploiting the demo inputs under ``prompts/``.
 
     Args:
-        keep: Maximum number of ordinary messages to retain, or 0 for no limit.
-            Manager messages never count towards this cap and are never rotated
-            out. The limit counts messages rather than tokens.
+        keep: Total number of messages to retain, or 0 for no limit. The first
+            message is fixed; later messages rotate through the other slots.
         speaker_pattern: Pattern with speaker and text groups, applied to each
             event. Unmatched events keep their full text with an empty speaker.
             Supply another pattern for worlds with a different format.
-        me: Label for local replies in transcript(), replaced by the
-            `assistant` role inside as_messages().
+        me: Label used for local replies in the transcript.
+        reset_rules: Callables that receive one raw event and return True when
+            the rotating tail should be cleared. By default, common Italian and
+            English requests to start a new conversation or clear context match.
 
-    The world removes internal tags such as ``[START_MSG]`` before the processor
-    sees a sample. This class recognises only the visible new-room greeting, so
-    history from completed rooms is discarded. It does not interpret any other
-    prompt wording or world-specific structure. ``last_input`` and
-    ``last_output`` expose the most recent completed processor turn to policies
-    or other cooperating components.
+    A reset rule can be a simple heuristic, a regular-expression wrapper or a
+    neural classifier. Conversation does not know which world produced the
+    event. ``last_input`` and ``last_output`` expose the most recent completed
+    processor turn to policies or other cooperating components.
     """
 
-    def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER, me: str = "io"):
+    def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER, me: str = "Io",
+                 reset_rules=DEFAULT_RESET_RULES):
         self.keep = keep
         self.pattern = re.compile(speaker_pattern, re.S)
         self.me = me
-        self.reset()
+        self.reset_rules = tuple(reset_rules)
+        self.history: list[Message] = []
+        self.last_input = ""
+        self.last_output = ""
 
     def reset(self) -> None:
-        """Clear the conversation history, last turn and known speakers."""
-        self.history: list[Message] = []
-        self.speakers: list[str] = []   # in the order they first spoke
+        """Clear the rotating slots while preserving the first message."""
+        self.history[:] = self.history[:1]
         self.last_input = ""
         self.last_output = ""
 
@@ -88,16 +105,18 @@ class Conversation:
         Only ``EVENT_SEPARATOR`` divides events, so internal newlines remain in
         the text. Routing tags have already been removed by the guest role. If
         the speaker pattern does not match, the whole event is stored with an
-        empty speaker. A named event with no body still registers that speaker,
-        although empty messages are omitted from the history.
+        empty speaker. Empty messages are omitted from the history.
         """
         new = []
         for event in sample.split(EVENT_SEPARATOR):
             event = event.strip()
             if not event:
                 continue
-            if re.match(ROOM_START, event, re.S):
+
+            # Clear the rotating tail first; the trigger is stored below.
+            if any(rule(event) for rule in self.reset_rules):
                 self.reset()
+
             match = self.pattern.match(event)
             if match:
                 speaker, text = match.group(1).strip(), match.group(2).strip()
@@ -105,8 +124,6 @@ class Conversation:
                 speaker, text = "", event   # Preserve the full unmatched event.
             message = Message(speaker=speaker, text=text, mine=False)
             new.append(message)
-            if message.speaker and message.speaker not in self.speakers:
-                self.speakers.append(message.speaker)
             self._store(message)
         self.last_input = sample
         return new
@@ -125,24 +142,20 @@ class Conversation:
     def _store(self, message: Message) -> None:
         if not message.text:
             return
-        self.history.append(message)
-        if not self.keep:
+
+        # The first stored message is the fixed context anchor.
+        if not self.history:
+            self.history.append(message)
             return
 
-        # Starter-kit policy: manager messages carry rules, rosters, reminders
-        # and vote requests, so retain them for the current room and apply
-        # `keep` only to guest messages and our own remembered replies.
-        # Competitors may choose a different conversation-management policy.
-        overflow = sum(item.speaker != MANAGER_SPEAKER for item in self.history) - self.keep
-        if overflow <= 0:
+        # With one slot, only the fixed first message fits.
+        if self.keep == 1:
             return
-        retained = []
-        for item in self.history:
-            if overflow > 0 and item.speaker != MANAGER_SPEAKER:
-                overflow -= 1
-                continue
-            retained.append(item)
-        self.history[:] = retained
+
+        # Rotate the oldest tail message when all k slots are occupied.
+        if self.keep and len(self.history) >= self.keep:
+            self.history.pop(1)
+        self.history.append(message)
 
     def last_message(self, mine: bool = False) -> Message | None:
         """Return the latest remote message, or a local one when mine=True."""
@@ -155,33 +168,31 @@ class Conversation:
         """Render up to `limit` recent messages as `Speaker: text` entries.
 
         Local replies use `me`, and events without a sender use `?`. A limit
-        of ``None`` or 0 includes the entire history.
+        of ``None`` or 0 includes the entire history. A positive limit still
+        includes the fixed first message.
         """
-        messages = self.history[-limit:] if limit else self.history
+        if not limit or len(self.history) <= limit:
+            messages = self.history
+        elif limit == 1:
+            messages = self.history[:1]
+        else:
+            messages = self.history[:1] + self.history[-(limit - 1):]
         return "\n".join(f"{self.me if m.mine else (m.speaker or '?')}: {m.text}"
                          for m in messages)
 
     def as_messages(self, system: str = "", nudge: str = "") -> list[dict]:
-        """Render history as chat messages, using `assistant` for local replies.
+        """Render the transcript as one neutral user message.
 
-        Remote events use the `user` role but retain the speaker name in their
-        text, so the model can distinguish several guests inside one role.
-        Consecutive turns with the same role are merged. If a local reply is
-        last, the list ends with `nudge`, or with `(tocca a te)` when no nudge
-        is supplied.
+        ``mine`` selects only the local speaker label. It does not imply an API
+        ``assistant`` role. Competitors who want role-based turns can implement
+        that mapping in their own conversation manager.
         """
         out: list[dict] = []
         if system:
             out.append({"role": "system", "content": system})
 
-        for message in self.history:
-            role = "assistant" if message.mine else "user"
-            text = message.text if message.mine else f"{message.speaker or '?'}: {message.text}"
-            if out and out[-1]["role"] == role and role != "system":
-                out[-1]["content"] += "\n" + text
-            else:
-                out.append({"role": role, "content": text})
-
-        if not out or out[-1]["role"] != "user":
-            out.append({"role": "user", "content": nudge or "(tocca a te)"})
+        content = self.transcript()
+        if nudge:
+            content = f"{content}\n{nudge}" if content else nudge
+        out.append({"role": "user", "content": content})
         return out

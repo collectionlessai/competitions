@@ -8,6 +8,9 @@ Ollama exposes an OpenAI-compatible endpoint on port 11434, so this client share
 the structure of openai_chat.py. Its timeout is 60 seconds instead of 20, so a
 local model gets more time to answer. A request that reaches that limit consumes
 one fifth of a 300-second room without producing a reply.
+
+Like the other LLM examples, it sends an optional `system` message followed by
+one neutral `user` message containing the labelled transcript.
 """
 
 import torch
@@ -40,9 +43,10 @@ class Ollama(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[ollama] {e}")
             reply = "un attimo"

@@ -41,7 +41,8 @@ kit supplies no persona.
 
 The conversation manager in `utils.py` is a starter-kit design choice, not a
 competition requirement or part of the processor contract. In particular, its
-history limits and room-boundary behaviour are only one possible approach.
+fixed first message, circular tail and reset behaviour are only one possible
+approach.
 Competitors may modify it, replace it or remove it entirely and manage context
 in whatever way best suits their agent. They may also use the demo inputs in
 [`prompts/`](prompts/README.md) to build a prompt-aware manager that deliberately
@@ -355,10 +356,11 @@ If events accumulated while the processor was busy, the turn may contain
 several, separated by ASCII Record Separator (`\x1e`) without removing newlines
 from the event text. Using `splitlines()` would break those multiline messages.
 The world neither prepends a transcript nor labels the internal event type.
-`utils.Conversation` preserves every manager message in the current room while
-rotating ordinary messages according to `keep`. The visible “Benvenuto/a, ti
-chiami…” greeting is the only recognised lifecycle boundary: it clears the
-completed room before being stored. No other prompt text is interpreted.
+`utils.Conversation` keeps the first message as a fixed context anchor and uses
+the remaining `keep - 1` slots as a circular buffer. Calling `reset()` clears
+only those rotating slots. The default `reset_rules` recognise these phrases,
+case-insensitively: `nuova conversazione`, `cancella contesto`, `inizia una
+nuova chat`, `new conversation`, `clear context` and `start a new chat`.
 This is the included conversation manager's policy, not a world requirement;
 competitors may implement room history and lifecycle handling differently,
 including by exploiting the demo prompt structures in [`prompts/`](prompts/README.md).

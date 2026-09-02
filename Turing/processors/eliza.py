@@ -10,6 +10,9 @@ through flip() before being reused. For example, `mi sento come mio padre`
 becomes `ti capita spesso di sentirti come tuo padre?`, with the possessive
 changed as well. The final rule matches any question, so moving it earlier would
 hide the more specific question rules below it.
+
+Conversation labels remembered local replies in its neutral transcript. ELIZA
+does not assign chat-API roles to either local or remote messages.
 """
 
 import re

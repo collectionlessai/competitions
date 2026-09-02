@@ -13,6 +13,9 @@ continues to receive other events.
 This processor defaults to 60 new tokens with 40 messages of history, compared
 with 80 for both settings in the API-backed examples. Larger values increase
 the work performed by your hardware.
+
+The pipeline receives an optional `system` message followed by one neutral
+`user` message containing the labelled transcript.
 """
 
 import torch
@@ -40,9 +43,10 @@ class HuggingFace(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[huggingface] {e}")
             reply = "un attimo"

@@ -24,7 +24,7 @@ round. The process continues until you stop it with Ctrl-C.
 Each processor turn contains only the events received since the previous turn,
 not a replay of the conversation. A backlog uses \x1e as its separator because
 events may contain newlines. utils.Conversation preserves those boundaries,
-keeps manager messages for the current room and resets at its visible greeting.
+keeps its first message fixed and rotates the remaining context slots.
 
 The final vote arrives alone as a UAI form projected to an Italian instruction.
 Return the requested aliases or one of the stated shortcuts. A malformed or

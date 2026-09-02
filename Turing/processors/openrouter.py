@@ -7,6 +7,9 @@ This processor follows `openai_chat.py` with two service-specific changes. The
 constructor reads its key through `os.environ[...]`, so a missing export raises
 `KeyError` before the processor is created. Model identifiers include the
 vendor prefix, as in the default `meta-llama/llama-3.1-8b-instruct`.
+
+It sends an optional `system` message followed by one neutral `user` message
+containing the labelled transcript.
 """
 
 import os
@@ -43,9 +46,10 @@ class OpenRouter(torch.nn.Module):
 
     def forward(self, sample: str) -> str:
         self.conv.add(sample)
+        messages = self.conv.as_messages(system=self.system_prompt)
 
         try:
-            reply = self.complete(self.conv.as_messages(system=self.system_prompt)).strip()
+            reply = self.complete(messages).strip()
         except Exception as e:
             print(f"[openrouter] {e}")
             reply = "aspetta un secondo"

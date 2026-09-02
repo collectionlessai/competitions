@@ -43,19 +43,31 @@ shows two events with the otherwise invisible separator rendered as `␞`:
 
 Every included processor first feeds the sample to a `Conversation`. The class
 in `utils.py` splits on the real Record Separator without altering internal
-newlines, retaining every `MANAGER` message, the last N ordinary messages and
-the first-seen order of speakers within the current room. The visible new-room
-greeting clears the completed room; no other manager prompt is interpreted.
+newlines. It keeps the first message as a fixed context anchor and rotates later
+messages through the other `keep - 1` slots. Calling `reset()` clears only the
+rotating slots.
+
+The optional `reset_rules` are ordinary callables from event text to `bool`.
+The defaults recognise `nuova conversazione`, `cancella contesto`, `inizia una
+nuova chat` and their English equivalents `new conversation`, `clear context`
+and `start a new chat`, case-insensitively. They are generic phrases rather than
+hotel events. Pass `reset_rules=()` to disable them, or replace them with rules
+based on the fixtures, a learned classifier or even a neural network.
+
+`as_messages()` sends this labelled transcript as one `user` message, plus an
+optional `system` message. A locally remembered line is labelled with `me`; it
+is not automatically assigned the API role `assistant`. Role-based turns are a
+valid alternative, but they are a competitor's conversation-design choice.
 
 After producing a reply, record it with `conv.remember(reply)` because the world
 sends it to the other guests but does not echo it back. Without this call, the
 local history contains no turns from your agent.
 
-The model can then read the current room from that history. The room name,
-roster, remaining time, moderation notices and projected UAI vote instruction
-all arrive as text, so the examples do not add special branches for them. The
-fixtures in [`../prompts/`](../prompts/README.md) cover every event shape and
-can be used without joining a world.
+The model can then read that context. The room name, roster, remaining time,
+moderation notices and projected UAI vote instruction all arrive as text, so
+the examples do not add special branches for them. The fixtures in
+[`../prompts/`](../prompts/README.md) cover every event shape and can be used
+without joining a world.
 
 ```python
 class MyProcessor(torch.nn.Module):

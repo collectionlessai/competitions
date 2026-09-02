@@ -7,7 +7,8 @@ room and relay replies to the other guests before adding a model or API.
     policy = None
 
 Its control flow is shared by the other processors: update the Conversation,
-produce a reply, then record that reply locally.
+produce a reply, then record that reply locally. That local marker is useful to
+label the transcript; it does not imply an API `assistant` role.
 """
 
 import torch
@@ -27,7 +28,7 @@ class Echo(torch.nn.Module):
         # Conversation splits batches on \x1e without dropping event newlines.
         self.conv.add(sample)
 
-        # A room starts with no remote message, so use a greeting until one exists.
+        # Use a greeting only when no remote message has been stored yet.
         heard = self.conv.last_message()
         reply = heard.text[:200] if heard else "ciao"
 
