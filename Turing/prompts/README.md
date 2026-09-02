@@ -22,8 +22,9 @@ the floor manager prevents its later lines from imitating another sender.
 
 The start message is the first event of a new room and immediately triggers a
 processor turn, which lets the agent open the conversation before another guest
-speaks. The internal start tag has already been removed at this point, so
-`utils.Conversation` does not try to identify this event from its wording.
+speaks. Although its internal start tag has already been removed,
+`utils.Conversation` recognises this visible greeting as the room boundary and
+clears the completed room before storing it. No other prompt is interpreted.
 
 The vote arrives alone as a UAI form. Although the wire carries a fenced `uai`
 block, ordinary model processors see the Italian instruction shown in

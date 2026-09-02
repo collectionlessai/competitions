@@ -19,6 +19,13 @@ each outgoing reply with remember():
         reply = my_model(conv.as_messages(system=persona))
         conv.remember(reply)
         return reply
+
+This conversation manager is an optional starter-kit implementation, not a
+competition rule. Competitors may change, replace or omit it; a processor only
+has to honour its public ``str -> str`` contract. The demo inputs under
+``prompts/`` may also be used to build a manager that deliberately exploits
+their wording or structure, accepting that those details may change between
+runs.
 """
 
 import re
@@ -28,6 +35,8 @@ from collections import namedtuple
 EVENT_SEPARATOR = "\x1e"
 DISPLAY_EVENT_SEPARATOR = "␞"
 SPEAKER = r"^\*\*(.+?):\*\*\s?(.*)$"
+MANAGER_SPEAKER = "MANAGER"
+ROOM_START = r"^\*\*MANAGER:\*\*\s*Benvenuto/a,\s+ti chiami\s+\*\*"
 
 # speaker: sender name, or "" for an event with no name
 # text:    event body with surrounding whitespace removed
@@ -38,10 +47,14 @@ Message = namedtuple("Message", "speaker text mine")
 class Conversation:
     """Store messages in arrival order, optionally capped by `keep`.
 
+    This retention policy is the starter kit's choice. It is not prescribed by
+    the world, and competitors are free to implement conversation state in a
+    different way, including by exploiting the demo inputs under ``prompts/``.
+
     Args:
-        keep: Maximum number of messages to retain, or 0 for no limit. Once the
-            cap is reached, new messages replace the oldest ones. The limit
-            counts messages rather than tokens.
+        keep: Maximum number of ordinary messages to retain, or 0 for no limit.
+            Manager messages never count towards this cap and are never rotated
+            out. The limit counts messages rather than tokens.
         speaker_pattern: Pattern with speaker and text groups, applied to each
             event. Unmatched events keep their full text with an empty speaker.
             Supply another pattern for worlds with a different format.
@@ -49,9 +62,11 @@ class Conversation:
             `assistant` role inside as_messages().
 
     The world removes internal tags such as ``[START_MSG]`` before the processor
-    sees a sample. This class deliberately does not infer them by matching prompt
-    wording or world-specific structures. A competitor could implement such a
-    heuristic and call reset(), but the starter kit does not exploit prompts.
+    sees a sample. This class recognises only the visible new-room greeting, so
+    history from completed rooms is discarded. It does not interpret any other
+    prompt wording or world-specific structure. ``last_input`` and
+    ``last_output`` expose the most recent completed processor turn to policies
+    or other cooperating components.
     """
 
     def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER, me: str = "io"):
@@ -61,9 +76,11 @@ class Conversation:
         self.reset()
 
     def reset(self) -> None:
-        """Clear the conversation history and known speakers."""
+        """Clear the conversation history, last turn and known speakers."""
         self.history: list[Message] = []
         self.speakers: list[str] = []   # in the order they first spoke
+        self.last_input = ""
+        self.last_output = ""
 
     def add(self, sample: str) -> list[Message]:
         """Store one processor input and return its delivered events.
@@ -79,6 +96,8 @@ class Conversation:
             event = event.strip()
             if not event:
                 continue
+            if re.match(ROOM_START, event, re.S):
+                self.reset()
             match = self.pattern.match(event)
             if match:
                 speaker, text = match.group(1).strip(), match.group(2).strip()
@@ -89,18 +108,35 @@ class Conversation:
             if message.speaker and message.speaker not in self.speakers:
                 self.speakers.append(message.speaker)
             self._store(message)
+        self.last_input = sample
         return new
 
     def remember(self, text: str) -> None:
         """Store a local reply that the world will not echo through add()."""
-        self._store(Message(speaker="", text=text.strip(), mine=True))
+        self.last_output = text.strip()
+        self._store(Message(speaker="", text=self.last_output, mine=True))
 
     def _store(self, message: Message) -> None:
         if not message.text:
             return
         self.history.append(message)
-        if self.keep and len(self.history) > self.keep:
-            del self.history[:-self.keep]
+        if not self.keep:
+            return
+
+        # Starter-kit policy: manager messages carry rules, rosters, reminders
+        # and vote requests, so retain them for the current room and apply
+        # `keep` only to guest messages and our own remembered replies.
+        # Competitors may choose a different conversation-management policy.
+        overflow = sum(item.speaker != MANAGER_SPEAKER for item in self.history) - self.keep
+        if overflow <= 0:
+            return
+        retained = []
+        for item in self.history:
+            if overflow > 0 and item.speaker != MANAGER_SPEAKER:
+                overflow -= 1
+                continue
+            retained.append(item)
+        self.history[:] = retained
 
     def last_message(self, mine: bool = False) -> Message | None:
         """Return the latest remote message, or a local one when mine=True."""

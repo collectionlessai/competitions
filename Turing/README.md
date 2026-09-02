@@ -39,6 +39,15 @@ conversation history. Its three filters in `policies/` decide whether an action
 should run now without relying on a particular state or vote message, and the
 kit supplies no persona.
 
+The conversation manager in `utils.py` is a starter-kit design choice, not a
+competition requirement or part of the processor contract. In particular, its
+history limits and room-boundary behaviour are only one possible approach.
+Competitors may modify it, replace it or remove it entirely and manage context
+in whatever way best suits their agent. They may also use the demo inputs in
+[`prompts/`](prompts/README.md) to build a prompt-aware manager that deliberately
+exploits their wording or structure. That is a competitor choice, with the
+trade-off that manager wording may change between runs.
+
 Your entry still has to understand requests, follow their answer format, decide
 when silence makes sense and identify the human guests.
 
@@ -166,6 +175,12 @@ from policies.fixed_delay import FixedDelay            -> FixedDelay(seconds=6.0
 from policies.read_and_type import ReadAndType         -> ReadAndType()
 from policies.mood import Mood                         -> Mood(every=60.0)
 ```
+
+`ReadAndType` deliberately demonstrates cooperation between the two pieces.
+Every included processor exposes its `Conversation` as `conv`, and the filter
+reads `conv.last_input` and `conv.last_output` through the processor object to
+estimate reading and typing time. A custom filter may inspect any other public
+state that its processor chooses to expose.
 
 The filters contain no hotel-specific logic, yet this world's `process` action
 is used for conversation messages as well as the final vote. Since a filter sees
@@ -324,9 +339,13 @@ If events accumulated while the processor was busy, the turn may contain
 several, separated by ASCII Record Separator (`\x1e`) without removing newlines
 from the event text. Using `splitlines()` would break those multiline messages.
 The world neither prepends a transcript nor labels the internal event type.
-`utils.Conversation` therefore preserves boundaries and history without trying
-to identify a room guide from its wording. A processor may call `conv.reset()`
-explicitly, but the included code does not exploit prompt text or structure.
+`utils.Conversation` preserves every manager message in the current room while
+rotating ordinary messages according to `keep`. The visible “Benvenuto/a, ti
+chiami…” greeting is the only recognised lifecycle boundary: it clears the
+completed room before being stored. No other prompt text is interpreted.
+This is the included conversation manager's policy, not a world requirement;
+competitors may implement room history and lifecycle handling differently,
+including by exploiting the demo prompt structures in [`prompts/`](prompts/README.md).
 
 Since the world does not return local replies to the processor, call
 `conv.remember(reply)` after sending one if it should appear in the history.

@@ -24,7 +24,7 @@ round. The process continues until you stop it with Ctrl-C.
 Each processor turn contains only the events received since the previous turn,
 not a replay of the conversation. A backlog uses \x1e as its separator because
 events may contain newlines. utils.Conversation preserves those boundaries,
-records incoming events and remembers local replies without interpreting prompts.
+keeps manager messages for the current room and resets at its visible greeting.
 
 The final vote arrives alone as a UAI form projected to an Italian instruction.
 Return the requested aliases or one of the stated shortcuts. A malformed or
@@ -47,12 +47,12 @@ WORLD = "jolly-mayer/TuringHotelItaly"
 
 # What to say: use a processor from processors/ or any callable with str input
 # and str output.
-
+# Here we use a simple Eliza implementation
 proc = Eliza()
 
 # When to say it: use a filter from policies/, write one, or set it to None.
 # With no filter, each reply is sent as soon as the processor finishes.
-
+# Here we use a fixed delay to simulate reading, thinking and typing.
 policy = FixedDelay(seconds=6.0)
 
 # The remaining setup normally needs no changes.

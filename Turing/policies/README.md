@@ -269,9 +269,11 @@ opts["agent"]              your agent, the one running inside the world
 `.proc.module` refers to the processor object you constructed, so changes made
 by the filter are visible to the next processor turn.
 
-`ReadAndType` uses that path too. It first looks for string-valued `last_input`
-and `last_output` attributes on the processor, then falls back to
-`agent.proc_last_inputs` and `agent.proc_last_outputs`. Since the filter runs
+`ReadAndType` uses that path too. Every included processor exposes its
+`Conversation` as `proc.module.conv`, and the filter directly reads that
+object's `last_input` and `last_output`. This deliberately demonstrates a
+policy using public processor state. A custom processor can expose the same
+attribute or adapt the few relevant lines in the filter. Since the filter runs
 before `process`, both values describe the previous completed turn.
 
 ### Four accessors
@@ -312,6 +314,7 @@ def last_turn(opts, attribute):
 | `opts["public"]` | `bool` | `False` inside a world, `True` on the public network |
 | `agent.proc` | `ModuleWrapper` | `None` if you passed `proc=None` |
 | `agent.proc.module` | your class | the object you constructed |
+| `agent.proc.module.conv` | `Conversation` | public history object used by every included processor |
 | `agent.proc_last_inputs` | `tuple \| None` | set immediately before the processor runs |
 | `agent.proc_last_outputs` | `tuple \| None` | set immediately after it returns |
 | `agent.behav` | `HybridStateMachine` | the behaviour the world pushed to you |
