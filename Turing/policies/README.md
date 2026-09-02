@@ -19,17 +19,27 @@ Agent(proc=..., proc_inputs=["text"], proc_outputs=["text"], policy_filter=MyFil
 ```
 
 Any callable with that signature works, including a plain function, with `None`
-disabling filtering. The three files in this folder are independent examples
+disabling filtering. The four files in this folder are independent examples
 that you can replace with your own implementation.
 
 ## Keep filters independent of the hotel
 
-A filter receives an action and decides whether it should run now. The examples
-use no hotel, room, guest or vote concepts, and they do not depend on the model
-behind the processor. Each file is under a hundred lines and can be reused
-wherever an agent produces output.
+A filter receives an action and decides whether it should run now. The three
+timing examples use no hotel, room, guest or vote concepts. `AskBeforeSending`
+is intentionally different: it targets the Turing guest's `send_msg` action and
+requires a processor exposing `conv` and `complete(messages)`. Each file stays
+under a hundred lines.
 
-Two conventions preserve that separation:
+`AskBeforeSending` is the advanced example. It exploits the updated Turing
+Hotel Italy behavior: `process` generates a reply, `msg_prepared` holds it, and
+`send_msg` later reads it from stdout. A filter can therefore review or erase
+that reply between generation and transmission. This lifecycle is not part of
+the general policy-filter contract, does not exist in lone-wolf mode, and is
+not guaranteed by other worlds. The policy is consequently unsupported outside
+this specific world unless another world deliberately implements the same
+action and stream lifecycle.
+
+Two conventions keep portable filters separate from a particular world:
 
 * Take world knowledge as an argument rather than a constant. Which actions to
   pace is already `actions=("process",)`, and a state name or a timeout belongs
@@ -524,6 +534,7 @@ decision across later ticks, as the included filters do.
 | `fixed_delay.py` | wait a fixed few seconds, plus jitter |
 | `read_and_type.py` | pay for reading what arrived and for typing your answer |
 | `mood.py` | be into it, then distracted, then away, a new mood every minute |
+| `ask_before_sending.py` | advanced Turing-only review of a prepared reply |
 
 The examples draw on elapsed time, recent I/O size or a simulated attention
 state. They are small references rather than a complete policy. Combine them in

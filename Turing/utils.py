@@ -116,6 +116,12 @@ class Conversation:
         self.last_output = text.strip()
         self._store(Message(speaker="", text=self.last_output, mine=True))
 
+    def discard_last_output(self) -> None:
+        """Forget the latest local reply when a policy decides not to send it."""
+        if self.history and self.history[-1].mine:
+            self.history.pop()
+        self.last_output = ""
+
     def _store(self, message: Message) -> None:
         if not message.text:
             return

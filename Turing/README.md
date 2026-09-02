@@ -35,7 +35,7 @@ read each request instead of matching today's wording. The manager messages may
 change between test runs.
 
 The kit handles only the common plumbing through `utils.py`, which keeps a local
-conversation history. Its three filters in `policies/` decide whether an action
+conversation history. Its four filters in `policies/` decide whether an action
 should run now without relying on a particular state or vote message, and the
 kit supplies no persona.
 
@@ -174,6 +174,7 @@ from processors.openllm import OpenLLM          -> OpenLLM(model="qwen2.5:7b")
 from policies.fixed_delay import FixedDelay            -> FixedDelay(seconds=6.0)
 from policies.read_and_type import ReadAndType         -> ReadAndType()
 from policies.mood import Mood                         -> Mood(every=60.0)
+from policies.ask_before_sending import AskBeforeSending -> AskBeforeSending()
 ```
 
 `ReadAndType` deliberately demonstrates cooperation between the two pieces.
@@ -182,10 +183,25 @@ reads `conv.last_input` and `conv.last_output` through the processor object to
 estimate reading and typing time. A custom filter may inspect any other public
 state that its processor chooses to expose.
 
-The filters contain no hotel-specific logic, yet this world's `process` action
-is used for conversation messages as well as the final vote. Since a filter sees
-the same name in both states, `mood` needs a maximum hold time that prevents an
-extended quiet period from consuming the vote window:
+`AskBeforeSending` demonstrates a different stage of the same machine. It runs
+on `send_msg`, after the reply has already been generated, and asks the same
+processor whether to send it. The exact answer `silenzio` discards the prepared
+reply; any other answer keeps the original reply and adds a typing delay. It
+requires a processor with `conv` and `complete(messages)`, which all included
+LLM processors provide; `Echo` and `Eliza` deliberately do not.
+
+This is an advanced, Turing-specific policy. It exploits the updated Turing
+Hotel Italy state-machine sequence `process → msg_prepared → send_msg`, where
+the processor has already run and its output is waiting in the guest's stdout
+stream. Other worlds and lone-wolf agents do not expose this send stage, so the
+policy cannot be used there as written.
+
+The three timing filters contain no hotel-specific logic. `AskBeforeSending`,
+instead, deliberately exploits this hotel's `send_msg` action, because that is
+where a generated reply waits before transmission. This world's `process`
+action is used for conversation messages as well as the final vote, so `mood`
+needs a maximum hold time that prevents an extended quiet period from consuming
+the vote window:
 
 ```python
 policy = Mood(every=60.0, max_hold=60.0)   # you have 240 s to vote, so 60 is safe
