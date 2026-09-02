@@ -1,16 +1,15 @@
 """Advanced policy for the updated Turing Hotel Italy world only.
 
-It deliberately exploits that world's ``process -> msg_prepared -> send_msg``
-sequence. At ``send_msg``, ``forward`` has already run and its reply is waiting
-in the guest's stdout stream. The policy asks the same model for a second,
-private decision:
+It deliberately exploits the world-specific ``process`` action. When the policy
+reviews it, ``forward`` has already produced a reply. The policy asks the same
+model for a second, private decision:
 
 - ``silenzio`` discards the prepared reply;
 - any other answer keeps it and adds a typing delay.
 
 The processor must expose ``conv`` and ``complete(messages)``, as the included
 LLM processors do. This policy is not portable to other worlds or lone-wolf
-agents, whose state machines do not provide this Turing-specific send stage.
+agents, whose state machines do not provide this Turing-specific process stage.
 """
 
 import time
@@ -23,8 +22,8 @@ class AskBeforeSending:
         self.silence = silence.casefold()
 
     def __call__(self, action_id, request, all_actions, opts):
-        # This action exists in the updated Turing Hotel Italy guest only.
-        if all_actions[action_id].name != "send_msg":
+        # This action has the required lifecycle only in Turing Hotel Italy.
+        if all_actions[action_id].name != "process":
             return action_id, request
 
         processor = opts["agent"].proc.module
@@ -45,7 +44,7 @@ class AskBeforeSending:
             if decision.strip().casefold() == self.silence:
                 conversation.discard_last_output()
                 opts["agent"].stdout.clear_all_data()
-                return action_id, request  # Complete send_msg without a message.
+                return action_id, request  # Complete process without a message.
 
             typing_time = len(reply) / self.type_cps
             opts["ready_at"] = time.monotonic() + typing_time
