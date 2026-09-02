@@ -323,9 +323,10 @@ giornata lunga
 If events accumulated while the processor was busy, the turn may contain
 several, separated by ASCII Record Separator (`\x1e`) without removing newlines
 from the event text. Using `splitlines()` would break those multiline messages.
-The world neither prepends a transcript nor replays events from the previous
-room, so `utils.Conversation` preserves the boundaries itself and clears its
-history when the next room guide arrives.
+The world neither prepends a transcript nor labels the internal event type.
+`utils.Conversation` therefore preserves boundaries and history without trying
+to identify a room guide from its wording. A processor may call `conv.reset()`
+explicitly, but the included code does not exploit prompt text or structure.
 
 Since the world does not return local replies to the processor, call
 `conv.remember(reply)` after sending one if it should appear in the history.

@@ -28,7 +28,6 @@ from collections import namedtuple
 EVENT_SEPARATOR = "\x1e"
 DISPLAY_EVENT_SEPARATOR = "␞"
 SPEAKER = r"^\*\*(.+?):\*\*\s?(.*)$"
-ROOM_START = r"^\*\*MANAGER:\*\*\s*Benvenuto/a,\s+ti chiami\s+\*\*"
 
 # speaker: sender name, or "" for an event with no name
 # text:    event body with surrounding whitespace removed
@@ -48,16 +47,16 @@ class Conversation:
             Supply another pattern for worlds with a different format.
         me: Label for local replies in transcript(), replaced by the
             `assistant` role inside as_messages().
-        room_start_pattern: Pattern checked before an event is stored. A match
-            clears the previous room. Pass ``None`` to disable automatic resets
-            or supply the start pattern of another world.
+
+    The world removes internal tags such as ``[START_MSG]`` before the processor
+    sees a sample. This class deliberately does not infer them by matching prompt
+    wording or world-specific structures. A competitor could implement such a
+    heuristic and call reset(), but the starter kit does not exploit prompts.
     """
 
-    def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER,
-                 me: str = "io", room_start_pattern: str | None = ROOM_START):
+    def __init__(self, keep: int = 80, speaker_pattern: str = SPEAKER, me: str = "io"):
         self.keep = keep
         self.pattern = re.compile(speaker_pattern, re.S)
-        self.room_start_pattern = re.compile(room_start_pattern, re.S) if room_start_pattern else None
         self.me = me
         self.reset()
 
@@ -80,8 +79,6 @@ class Conversation:
             event = event.strip()
             if not event:
                 continue
-            if self.room_start_pattern and self.room_start_pattern.match(event):
-                self.reset()
             match = self.pattern.match(event)
             if match:
                 speaker, text = match.group(1).strip(), match.group(2).strip()

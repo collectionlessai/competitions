@@ -4,8 +4,6 @@ __pycache__/
 *$py.class
 
 tests/
-!Turing/tests/
-!Turing/tests/*.py
 # C extensions
 *.so
 

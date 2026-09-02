@@ -43,8 +43,10 @@ shows two events with the otherwise invisible separator rendered as `␞`:
 
 Every included processor first feeds the sample to a `Conversation`. The class
 in `utils.py` splits on the real Record Separator without altering internal
-newlines, the last N events and the first-seen order of speakers. A new room
-guide clears the old room, but no other text is normalized or interpreted.
+newlines, retaining the last N events and the first-seen order of speakers. It
+does not infer hidden event types from prompt wording or structure. Competitors
+may call `reset()` themselves, but the included processors do not exploit the
+manager prompts to detect room boundaries.
 
 After producing a reply, record it with `conv.remember(reply)` because the world
 sends it to the other guests but does not echo it back. Without this call, the

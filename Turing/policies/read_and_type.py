@@ -7,13 +7,11 @@ than short ones:
     thinking = a random pause
     typing   = length of what you wrote / typing speed
 
-The pending processor input is read non-destructively from the agent's input
-stream. The framework exposes the previous processor output through
-opts["agent"], which provides the typing estimate for the next turn.
-
-Because the filter runs before the processor, the next reply does not exist yet.
-The typing estimate therefore uses the previous reply. This shifts only that
-component by one turn but retains its contribution over a conversation.
+The filter runs before the processor, so both measurements describe the
+previous completed turn. It first checks whether the processor saved
+``last_input`` or ``last_output`` attributes itself, then uses the equivalent
+framework hooks. This keeps the example small and lets a custom processor
+expose its own state.
 """
 
 import time
@@ -32,35 +30,15 @@ def last_turn(opts, attribute: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def pending_input(opts, request, action, requested_by: str) -> str:
-    """Return the text waiting for this process action without consuming it.
-
-    Stream reads are deduplicated per requester, so this policy uses its own
-    requester name and does not interfere with Agent.process. UAI input is
-    projected through the same callback that the processor wrapper uses.
-    """
-    agent = opts.get("agent")
-    get_stream = getattr(agent, "get_stream", None)
-    if not callable(get_stream):
-        return last_turn(opts, "proc_last_inputs")
-
-    stream = get_stream("processor_in", data_type="text")
-    if stream is None:
-        return last_turn(opts, "proc_last_inputs")
-
-    interaction = request if request is not None else getattr(action, "system_interaction", None)
-    uuid = getattr(interaction, "uuid", None)
-    sample = stream.get(requested_by=requested_by, uuid=uuid)
-    if not isinstance(sample, str):
-        return last_turn(opts, "proc_last_inputs")
-
-    project = getattr(agent, "uai_preprocess", None)
-    if callable(project):
-        try:
-            sample, _ = project(sample)
-        except Exception:
-            pass
-    return sample
+def processor_turn(opts, attribute: str, fallback: str) -> str:
+    """Read a string saved by the processor, then try the framework hook."""
+    processor = getattr(getattr(opts.get("agent"), "proc", None), "module", None)
+    value = getattr(processor, attribute, None)
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if isinstance(value, str):
+        return value
+    return last_turn(opts, fallback)
 
 
 class ReadAndType:
@@ -79,13 +57,12 @@ class ReadAndType:
         now = time.monotonic()
 
         if "ready_at" not in opts:
-            action = all_actions[action_id]
-            current_input = pending_input(opts, request, action, f"ReadAndType:{id(self)}")
-            fresh = len(current_input)
+            previous_input = processor_turn(opts, "last_input", "proc_last_inputs")
+            previous_output = processor_turn(opts, "last_output", "proc_last_outputs")
             thinking = random.expovariate(1.0 / self.think) if self.think > 0 else 0.0
-            delay = (fresh / self.read_cps
+            delay = (len(previous_input) / self.read_cps
                      + thinking
-                     + len(last_turn(opts, "proc_last_outputs")) / self.type_cps)
+                     + len(previous_output) / self.type_cps)
 
             # Cap the delay so a long backlog cannot postpone the reply indefinitely.
             opts["ready_at"] = now + min(delay, 45.0)

@@ -251,9 +251,8 @@ are protocol steps whose order is controlled by the state machine.
 
 A filter can use more than elapsed time. Through the live agent stored in
 `opts["agent"]`, it can inspect the current state machine alongside the
-processor's previous input or output. A filter that needs the input currently
-waiting for `process` should inspect the `processor_in` stream with a dedicated
-requester, as `read_and_type.py` does; `proc_last_inputs` is one turn behind.
+processor's previous input or output. These values are intentionally one turn
+behind because the filter runs before `process`.
 
 The relevant attributes are:
 
@@ -269,6 +268,11 @@ opts["agent"]              your agent, the one running inside the world
 
 `.proc.module` refers to the processor object you constructed, so changes made
 by the filter are visible to the next processor turn.
+
+`ReadAndType` uses that path too. It first looks for string-valued `last_input`
+and `last_output` attributes on the processor, then falls back to
+`agent.proc_last_inputs` and `agent.proc_last_outputs`. Since the filter runs
+before `process`, both values describe the previous completed turn.
 
 ### Four accessors
 
