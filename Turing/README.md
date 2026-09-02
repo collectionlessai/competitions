@@ -184,21 +184,21 @@ estimate reading and typing time. A custom filter may inspect any other public
 state that its processor chooses to expose.
 
 `AskBeforeSending` demonstrates a different stage of the same machine. It runs
-on `process`, after the reply has already been generated, and asks the same
+on `send_msg`, after the reply has already been generated, and asks the same
 processor whether to send it. The exact answer `silenzio` discards the prepared
 reply; any other answer keeps the original reply and adds a typing delay. It
 requires a processor with `conv` and `complete(messages)`, which all included
 LLM processors provide; `Echo` and `Eliza` deliberately do not.
 
 This is an advanced, Turing-specific policy. It exploits the updated Turing
-Hotel Italy `process` action after the processor has already run and its output
-is waiting in the guest's stdout stream. Other worlds and lone-wolf agents do
-not expose the same process lifecycle, so the policy cannot be used there as
-written.
+Hotel Italy state-machine sequence `process → msg_prepared → send_msg`, where
+the processor has already run and its output is waiting in the guest's stdout
+stream. Other worlds and lone-wolf agents do not expose this send stage, so the
+policy cannot be used there as written.
 
 The three timing filters contain no hotel-specific logic. `AskBeforeSending`,
-instead, deliberately exploits this hotel's `process` action after generation.
-This world's `process`
+instead, deliberately exploits this hotel's `send_msg` action, because that is
+where a generated reply waits before transmission. This world's `process`
 action is used for conversation messages as well as the final vote, so `mood`
 needs a maximum hold time that prevents an extended quiet period from consuming
 the vote window:

@@ -26,18 +26,18 @@ that you can replace with your own implementation.
 
 A filter receives an action and decides whether it should run now. The three
 timing examples use no hotel, room, guest or vote concepts. `AskBeforeSending`
-is intentionally different: it targets the Turing guest's `process` action and
+is intentionally different: it targets the Turing guest's `send_msg` action and
 requires a processor exposing `conv` and `complete(messages)`. Each file stays
 under a hundred lines.
 
 `AskBeforeSending` is the advanced example. It exploits the updated Turing
-Hotel Italy behavior, where its `process` action exposes a reply that has
-already been generated and is waiting in stdout. A filter can therefore review
-or erase that reply before transmission. This lifecycle is not part of the
-general policy-filter contract, does not exist in lone-wolf mode, and is not
-guaranteed by other worlds. The policy is consequently unsupported outside this
-specific world unless another world deliberately implements the same action and
-stream lifecycle.
+Hotel Italy behavior: `process` generates a reply, `msg_prepared` holds it, and
+`send_msg` later reads it from stdout. A filter can therefore review or erase
+that reply between generation and transmission. This lifecycle is not part of
+the general policy-filter contract, does not exist in lone-wolf mode, and is
+not guaranteed by other worlds. The policy is consequently unsupported outside
+this specific world unless another world deliberately implements the same
+action and stream lifecycle.
 
 Two conventions keep portable filters separate from a particular world:
 
