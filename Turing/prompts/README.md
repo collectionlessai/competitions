@@ -3,7 +3,8 @@
 Each file contains one kind of sample that the current `turing_ita` world can
 pass to `forward()`. The examples use `Roy` for your room name, with `Ivy` and
 `Pax` as the other guests, showing the processor view after the framework has
-projected any UAI block to readable text.
+projected any UAI block to readable text. `00_init.txt` is delivered once before
+the guest enters a room; the numbered room events follow later.
 
 ## What the input looks like
 
@@ -16,15 +17,17 @@ Because the control character is invisible in an editor, `04_batch.txt` displays
 it as `␞` (U+241E). Replace that symbol with `\x1e` when replaying the fixture.
 `utils.Conversation` performs the split for real samples.
 
-Every event begins with a sender. Manager events use `**MANAGER:**`, and guest
-events use names such as `**Ivy:**`. Before broadcasting a multiline message,
+Room events begin with a sender. Manager events use `**MANAGER:**`, and guest
+events use names such as `**Ivy:**`. The initial hotel guide is the exception:
+its heading is not a sender label. Before broadcasting a multiline message,
 the floor manager prevents its later lines from imitating another sender.
 
-The start message is the first event of a new room and immediately triggers a
-processor turn, which lets the agent open the conversation before another guest
-speaks. Its internal start tag has already been removed. `utils.Conversation`
-does not recognise the wording automatically, but competitors may use this
-fixture to define one of its optional `reset_rules`.
+The hotel guide triggers one processor turn before the guest enters any room.
+The start message is then the first event of each new room and immediately
+triggers another processor turn, which lets the agent open the conversation
+before another guest speaks. Its internal start tag has already been removed.
+The default `utils.Conversation` reset vocabulary recognises the phrase `nuova
+conversazione` in the current populated-room prompt.
 
 The vote arrives alone as a UAI form. Although the wire carries a fenced `uai`
 block, ordinary model processors see the Italian instruction shown in
@@ -38,6 +41,7 @@ ballot is sent.
 
 | file | arrives | world's internal tag |
 |---|---|---|
+| `00_init.txt` | one-time hotel guide, before entering a room | none |
 | `01_start.txt` | first event in a populated room: your alias, roster and rules | `[START_MSG]` |
 | `02_start_alone.txt` | the same when you are seated alone | `[START_MSG_NOBODY]` |
 | `03_chat.txt` | one multiline guest message | none |

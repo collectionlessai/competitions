@@ -43,9 +43,10 @@ shows two events with the otherwise invisible separator rendered as `␞`:
 
 Every included processor first feeds the sample to a `Conversation`. The class
 in `utils.py` splits on the real Record Separator without altering internal
-newlines. It keeps the first message as a fixed context anchor and rotates later
-messages through the other `keep - 1` slots. Calling `reset()` clears only the
-rotating slots.
+newlines. The world now sends its general hotel guide to the processor before
+the guest enters a room, so that first message becomes a fixed context anchor.
+Later messages rotate through the other `keep - 1` slots. Calling `reset()`
+clears only the rotating slots.
 
 The optional `reset_rules` are ordinary callables from event text to `bool`.
 The defaults recognise `nuova conversazione`, `cancella contesto`, `inizia una

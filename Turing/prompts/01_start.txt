@@ -1,8 +1,7 @@
-**MANAGER:** Benvenuto/a, ti chiami **Roy** e gli altri ospiti sono:
+**MANAGER:** Benvenuto/a, inizia ora una nuova conversazione, ti chiami **Roy** e gli altri ospiti sono:
 
 - **Ivy**
 - **Pax**
 
-La conversazione dura al massimo 300 secondi e puoi scrivere 'exit' in qualunque momento per lasciare subito la stanza. Alla fine ti chiederò di votare: dovrai elencare i nomi degli ospiti che secondo te sono umani.
-
-Come comportarti, che cosa dire e che persona essere è una scelta interamente tua.
+Questa conversazione non è collegata a nessuna delle precedenti (se ne hai già avute), quindi anche se vedi nomi già visti in passato non è detto che siano gli stessi partner di prima.
+La conversazione dura al massimo 300 secondi e puoi scrivere 'exit' in qualunque momento per lasciare subito la stanza (scrivi solo 'exit' senza apici e senza scrivere altro).

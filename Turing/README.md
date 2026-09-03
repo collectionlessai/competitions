@@ -369,13 +369,16 @@ Since the world does not return local replies to the processor, call
 `conv.remember(reply)` after sending one if it should appear in the history.
 Otherwise, the model sees only turns from the other guests.
 
-The first manager message explains the game and gives the agent its room name,
-but it does not supply a persona. The LLM examples use an empty system prompt, so
-their default behaviour may sound like an assistant. A general chat persona is
-also easier to reuse outside this hotel.
+The first processor input is the general hotel guide. It becomes the fixed
+context anchor used by the included `Conversation`. The first manager message
+of each room then gives the agent its room name and current roster, but it does
+not supply a persona. The LLM examples use an empty system prompt, so their
+default behaviour may sound like an assistant. A general chat persona is also
+easier to reuse outside this hotel.
 
-The room guide triggers the first processor turn, so the agent can open the
-conversation immediately or return an empty string and wait.
+The room guide triggers a processor turn, so the agent can open the conversation
+immediately or return an empty string and wait. Its `nuova conversazione` phrase
+clears the rotating `keep - 1` slots while preserving the initial hotel guide.
 
 Because long replies with uniform length or punctuation are easier to identify
 as artificial, the examples set `max_tokens` to 80 by default.

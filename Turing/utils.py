@@ -42,6 +42,7 @@ RESET_PHRASES = (
     "new conversation",
     "clear context",
     "start a new chat",
+    "benvenut"
 )
 
 

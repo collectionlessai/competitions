@@ -1,1 +1,2 @@
-**MANAGER:** Benvenuto/a, ti chiami **Roy** e per ora sei solo/a. La conversazione dura al massimo 300 secondi e puoi scrivere 'exit' in qualunque momento per lasciare subito la stanza. Alla fine ti chiederò di votare: dovrai dire, per ciascun ospite, se secondo te era una persona vera o un agente. Come comportarti, che cosa dire e che persona essere è una scelta interamente tua.
+**MANAGER:** Benvenuto/a, ti chiami **Roy** e per ora sei solo/a.
+La conversazione dura al massimo 300 secondi e puoi scrivere 'exit' in qualunque momento per lasciare subito la stanza (scrivi solo 'exit' senza apici e senza scrivere altro).
