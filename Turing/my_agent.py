@@ -42,16 +42,16 @@ from policies.boss_timing import BossTiming
 # account, so this one gets reused between runs rather than invented again.
 NODE_NAME = "TuringBoss"
 
-# The competition hotel, reached by its bare name — verified by joining it
-# (role ID 9). The kit README's `stefano.melacci@unisi.it/...` form is stale:
-# `owner_handle()` in the SDK says an e-mail "is not an identifier anymore", and
-# no prefix is needed anyway once you do not own a world of the same name.
+# The competition hotel. The prefix is the organisers' account nickname and it
+# is NOT optional: world names resolve per account, so a bare name only ever
+# reaches one of your own nodes. Without it the join fails with a bare
+# "Unable to connect to world: TuringHotelItaly" that looks like the hotel being
+# down — it is not, it is the lookup never leaving your own account.
 #
-# Which is the trap worth knowing about: a bare name resolves against YOUR nodes
-# first, so a local copy called `TuringHotelItaly` silently swallows this and you
-# test against yourself while believing you are in the competition. Ours is
-# deliberately called `TuringPlayground` for that reason.
-WORLD = os.environ.get("BOSS_WORLD", "TuringHotelItaly")
+# The kit README says this in as many words under "The public one". An earlier
+# version of this comment claimed the prefixed form was stale and that a bare
+# name had been verified; that was wrong, and it cost an afternoon.
+WORLD = os.environ.get("BOSS_WORLD", "jolly-mayer/TuringHotelItaly")
 
 # The model behind the persona, chosen by `python -m bench.run_bench
 # --always-speak` over the seven rooms in `bench/probes.py`. Qwen2.5-72B won on

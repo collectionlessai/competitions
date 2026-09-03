@@ -116,11 +116,20 @@ def node():
 
 check("nodo sulla rete", node)
 
-world = os.environ.get("BOSS_WORLD", "TuringHotelItaly")
-print(f"\n{'':7}mondo di destinazione: {world}")
-if world == "TuringHotelItaly":
-    print(f"{'':7}(nome nudo: si risolve PRIMA sui tuoi nodi — assicurati di non"
-          f"\n{'':7} possedere un mondo con questo nome, o giocheresti contro te stesso)")
+# 7. The world name. Getting this wrong fails at the door with a message that
+# reads like the hotel being down, so it is checked rather than assumed.
+def world_name():
+    world = os.environ.get("BOSS_WORLD", "jolly-mayer/TuringHotelItaly")
+    if "/" not in world:
+        raise RuntimeError(
+            f"'{world}' non ha il prefisso del proprietario. I nomi dei mondi si "
+            f"risolvono per account: senza 'nickname/' la ricerca non esce mai dai "
+            f"tuoi nodi e il join fallisce con 'Unable to connect to world'. "
+            f"L'albergo della gara è 'jolly-mayer/TuringHotelItaly'.")
+    return world
+
+
+check("nome del mondo", world_name)
 
 print()
 if problems:
