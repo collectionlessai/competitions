@@ -248,21 +248,16 @@ file saying otherwise was wrong. Used rarely and worded differently each time,
 because an agent that tries the same trick on everybody has identified itself.
 The value is in reading who takes it, not in the attack.
 
-**10. Personas: keep them grey.** The biography stays, but as cover for personal
-questions that are not identifying — not as material to perform. Nothing
-creative, nothing memorable: the aim is to be unrecognisable from one run to the
-next.
-
-**11. Re-measure.** The only ground truth we have — 14 rooms, 0 correct, 40
+**10. Re-measure.** The only ground truth we have — 14 rooms, 0 correct, 40
 false positives — predates the inverted analyst, the two axes and the fallback
 fix. None of today's work has been measured. Note the hotel currently holds
 **only bots**, which makes `nessuno` the right answer and precision measurable.
 
-**12. Test our own resistance to the baits.** After 8 and 9 exist.
+**11. Test our own resistance to the baits.** After 8 and 9 exist.
 
-**13. `TuringMiniBoss`.** The conference-agnostic version. Next thing after this
+**12. `TuringMiniBoss`.** The conference-agnostic version. Next thing after this
 one is finished.
 
-**14. Model bench, low priority.** Re-check whether Minerva is served (it was
+**13. Model bench, low priority.** Re-check whether Minerva is served (it was
 not on 2026-08-27, and it is a 7B against 32B/72B opponents).
 
