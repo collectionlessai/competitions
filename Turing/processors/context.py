@@ -20,6 +20,7 @@ actually there.
 """
 
 import os
+import re
 import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,8 +53,9 @@ class Context:
     def __init__(self, path: str = CONTEXT_FILE):
         self.path = path
         self._stamp = None
-        self.always: list[str] = []
-        self.notes: list[str] = []
+        self.always: list[str] = []      # ## CORE: poche righe, sempre
+        self.blocks: list[tuple] = []    # ## BLOCCO: (nome, regex, righe)
+        self.notes: list[str] = []       # non più alimentato, vedi reload()
         self.words: list[str] = []          # specific markers
         self.obvious: list[str] = []        # things everybody knows: worth nothing
         self.programme: list[tuple] = []    # (date, start, end, text)
@@ -72,7 +74,13 @@ class Context:
 
         self.always, self.notes, self.programme, self.off_hours = [], [], [], []
         self.words, self.obvious = [], []
+        self.blocks = []
         section = ""
+        block_name, block_rule, block_lines = "", None, []
+
+        def close_block():
+            if block_name and block_lines:
+                self.blocks.append((block_name, block_rule, list(block_lines)))
         with open(self.path, encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
@@ -81,15 +89,31 @@ class Context:
                 # Tested before the comment skip: a section header starts with
                 # "#" too, and checking the other way round drops every one
                 if line.startswith("##"):
+                    close_block()
+                    block_name, block_rule, block_lines = "", None, []
                     section = line.lstrip("#").strip().upper()
+                    if section.startswith("BLOCCO"):
+                        block_name = section[6:].strip().lower() or "?"
+                        section = "BLOCCO"
                     continue
                 if line.startswith("#"):
                     continue
 
-                if section == "SEMPRE":
+                if section in ("CORE", "SEMPRE"):
                     self.always.append(line)
-                elif section == "NOTE":
-                    self.notes.append(line)
+                elif section == "BLOCCO":
+                    # The "@" line is the trigger, everything after it is content
+                    if line.startswith("@"):
+                        try:
+                            # Leading word boundary only: "amat" must not fire
+                            # on "stamattina", but "atterrat" still has to
+                            # match "atterrato", so the tail stays open.
+                            block_rule = re.compile(
+                                r"\b(?:" + line[1:].strip() + ")", re.IGNORECASE)
+                        except re.error:
+                            block_rule = None
+                    else:
+                        block_lines.append(line)
                 elif section == "PAROLE":
                     self.words += [w.lower() for w in line.split()]
                 elif section == "PAROLE-OVVIE":
@@ -105,6 +129,7 @@ class Context:
                     if "-" in when:
                         start, _, end = when.strip().partition("-")
                         self.off_hours.append((start, end, what.strip()))
+        close_block()
 
     # -- slicing it -------------------------------------------------------
 
@@ -153,8 +178,17 @@ class Context:
             words |= {w.strip(".,;:!?()'\"").lower() for w in note.split() if len(w) > 4}
         return frozenset(words - _common_words() - frozenset(self.obvious))
 
-    def block(self, when: datetime.datetime | None = None) -> str:
-        """The whole context for one turn, ready to drop into the prompt."""
+    def block(self, when: datetime.datetime | None = None, said: str = "") -> str:
+        """The context for one turn: the core, the clock, and whatever the room
+        has actually brought up.
+
+        `said` is the recent conversation. Blocks whose trigger matches it are
+        pulled in; the rest stay out. The old version handed the model the whole
+        file every turn, and what came back was the most colourful line in it,
+        used wherever it fitted worst — "mi sono perso tutto per l'arancina
+        femminile", "il talk sulle panelle". A model asked about the venue
+        should be told about the venue and nothing else.
+        """
         self.reload()
         when = when or datetime.datetime.now()
 
@@ -166,7 +200,12 @@ class Context:
             when_word = "Adesso" if self.during_conference(when) else "In questo momento"
             lines.append(f"{when_word} ({when:%H:%M}): {now}")
 
-        if self.notes:
-            lines.append("Cose che sai perché c'eri:")
-            lines += [f"- {note}" for note in self.notes]
+        for name, rule, content in self.blocks:
+            if rule is not None and said and rule.search(said):
+                lines += content
         return "\n".join(lines)
+
+    def open_blocks(self, said: str) -> list[str]:
+        """Which blocks the current conversation opens. For tracing."""
+        return [n for n, rule, _ in self.blocks
+                if rule is not None and said and rule.search(said)]

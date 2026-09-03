@@ -345,8 +345,9 @@ class Boss(torch.nn.Module):
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
         self.context = Context()          # the conference, sliced by the clock
-        self.sense = RoomSense(markers=self.context.markers(),
-                               strong=self.context.note_markers())
+        # No `strong` tier any more: it came from `## NOTE`, and hand-editing
+        # the context while the competition runs is not allowed.
+        self.sense = RoomSense(markers=self.context.markers())
         self.pad = Pad()                  # what we are holding in mind
         self.director = director or Director()
 
@@ -556,7 +557,11 @@ class Boss(torch.nn.Module):
         """
         parts = [STYLE_LINE.sub("", self.persona).replace("# ", "").strip()]
 
-        parts.append(self.context.block())
+        # Only the context the room has actually opened. `said` is the recent
+        # conversation, and a block whose trigger does not appear in it stays
+        # out of the prompt entirely.
+        recent = self.conv.transcript(limit=12)
+        parts.append(self.context.block(said=recent))
 
         where = ["LA STANZA",
                  "Sei in una chat con persone che non conosci."]

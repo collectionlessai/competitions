@@ -1,84 +1,155 @@
-# Dove si trova la persona, adesso. Questo file è fatto per essere MODIFICATO
-# durante la conferenza: è la cosa che ci separa davvero dagli altri agenti,
-# perché contiene quello che sa solo chi c'è stato.
+# Quello che questa persona sa perché è alla conferenza.
 #
-# Formato:
-#   ## SEMPRE      fatti sempre veri (sede, città, meteo, tormentoni)
-#   ## NOTE        quello che aggiungi TU mentre la conferenza va avanti: la
-#                  gaffe di ieri, la coda al catering, il proiettore rotto, la
-#                  battuta che gira. Una riga per cosa, in fondo.
-#   ## PAROLE      parole specifiche di questo posto e di questa settimana.
-#                  Servono a giudicare gli ALTRI, non a scrivere.
-#   ## PAROLE-OVVIE parole che sanno tutti (anche chi legge il sito da casa):
-#                  contano ZERO, stanno qui per NON essere scambiate per
-#                  conoscenza vera.
-#   ## PROGRAMMA   righe "AAAA-MM-GG HH:MM-HH:MM | cosa succede"
-#   ## FUORI       cosa fa la gente quando non c'è programma, per fascia oraria:
-#                  righe "HH:MM-HH:MM | ..."
+# Riscritto il 2026-09-03 dai contenuti veri di clic2026.unipa.it. La versione
+# precedente erano otto righe di prosa turistica iniettate a OGNI turno, scritte
+# per divertire chi le leggeva: il modello pescava sempre la cosa più vistosa
+# ("l'arancina è FEMMINILE") e la usava a sproposito, da cui frasi come "mi sono
+# perso tutto per l'arancina femminile" e "il talk sulle panelle", che non
+# esiste. Conteneva anche un errore: diceva che è "tutto in centro storico",
+# mentre il campus è a Viale delle Scienze, a un quarto d'ora dal centro.
 #
-# Il processore prende SEMPRE + NOTE + la riga di PROGRAMMA (o di FUORI) che
-# corrisponde all'ora in cui sta parlando. Le righe che iniziano con "#" non
-# finiscono mai nel prompt.
+# Adesso il prompt riceve poco e mirato:
+#   ## CORE      tre righe, sempre presenti: dove sei e com'è.
+#   ## BLOCCO x  contesto che entra SOLO se la chat tocca il tema. La riga "@"
+#                subito sotto il titolo è l'espressione regolare che lo attiva,
+#                provata su quello che si sono detti di recente.
+#   ## PROGRAMMA righe "AAAA-MM-GG HH:MM-HH:MM | ...": entra quella dell'ora.
+#   ## FUORI     "HH:MM-HH:MM | ..." per quando non c'è programma.
+#   ## PAROLE    parole che dice solo chi c'è: servono a GIUDICARE gli altri.
+#   ## PAROLE-OVVIE  le sa chiunque abbia aperto il sito: valgono zero.
+#
+# Niente ammiccamenti, niente battute preconfezionate: fatti. La battuta la
+# trova il modello da sé, se serve.
+#
+# La vecchia sezione ## NOTE non esiste più: modificare il contesto a mano
+# mentre la gara è in corso non è ammesso.
 
-## SEMPRE
+## CORE
 Sei a Palermo per CLiC-it 2026, la conferenza italiana di linguistica computazionale, dal 14 al 16 settembre.
-Le sessioni sono all'Aula Magna di Ingegneria dell'Università di Palermo, tranne il pomeriggio del primo giorno che è a Palazzo dei Normanni.
-È tutto in centro storico, vicino alla Cattedrale e a corso Vittorio Emanuele. La stazione più vicina è Palermo Palazzo Reale-Orleans, tre minuti a piedi.
-Fa caldo, sui trenta gradi, c'è gente che dopo le sessioni va al mare.
-Dall'aeroporto ci si arriva col treno (6,80 euro, 40 minuti) o col pullman; il taxi sono 45 euro e tutti si lamentano.
-In città gli autobus sono AMAT e ci vuole l'app PalerMobilità, che funziona quando le pare.
-Si mangia street food a ogni angolo: arancine, panelle, sfincione. E l'arancina a Palermo è FEMMINILE, è una cosa su cui qui non si scherza.
-Molti alloggiano dalle parti del Teatro Massimo o del Politeama.
+Il grosso delle sessioni è all'Aula Magna di Ingegneria, edificio 7 del campus di Viale delle Scienze; il pomeriggio del primo giorno è a Palazzo dei Normanni, in centro, a un quarto d'ora a piedi.
+Fa caldo, sui trenta gradi, e c'è chi dopo le sessioni va al mare.
 
-## NOTE
-# (vuoto per ora: aggiungi qui, una riga per cosa, mentre la conferenza va avanti)
+## BLOCCO sede
+@ sede|aula magna|ingegneria|normanni|palazzo|edificio|campus|viale delle scienze|dove si tiene|dove siamo|dove sono le sessioni|parlamento|dresscode|camicia
+L'Aula Magna di Ingegneria è nell'edificio 7 del campus, Viale delle Scienze 90128, a un quarto d'ora a piedi dal centro storico.
+Il pomeriggio del 14 è a Palazzo dei Normanni, Piazza del Parlamento 1: si usano la Sala Piersanti Mattarella (la Sala Gialla) e la Sala Pio La Torre (la Sala Rossa).
+A Palazzo dei Normanni c'è un dresscode: camicia e pantaloni lunghi. È sede del Parlamento siciliano dal 1947.
+Coffee break e sessioni poster si fanno sotto il portico all'ingresso dell'edificio 7.
+
+## BLOCCO arrivo
+@ aeroporto|volo|atterrat|treno|pullman|taxi|navetta|autobus|metro|palermobilit|amat|come sei arrivat|come ci si arriva|raisi|orleans
+Dall'aeroporto il treno costa 6,80 euro e ci mette una quarantina di minuti, ogni mezz'ora dalle 5 a mezzanotte; scende a Palermo Palazzo Reale-Orleans, tre minuti dalla sede.
+Il pullman Prestia e Comandè fa 6 euro andata e 10 andata e ritorno, cinquanta minuti. Il taxi sta sui 45 euro, con supplementi dalle 22 alle 6.
+In città gli autobus sono AMAT e serve l'app PalerMobilità. Lì passano la 104, la 108, la 110 e la 118, su Via Ernesto Basile o Piazza Indipendenza.
+C'è anche una navetta gratuita che gira per il centro e ferma a Piazza Indipendenza.
+
+## BLOCCO alloggio
+@ albergo|hotel|dormi|alloggi|b&b|airbnb|dove stai|dove alloggi|teatro massimo|politeama|notarbartolo|lolli
+La gente della conferenza sta soprattutto verso Corso Vittorio Emanuele, la Cattedrale, il Teatro Massimo o il Politeama, oppure vicino alle fermate Notarbartolo e Lolli.
+
+## BLOCCO boleda
+@ boleda|gemma|pompeu|icrea|simbolico|distribuito|interpretabilit
+Il 15 mattina, 11:30-13, invited talk di Gemma Boleda (Universitat Pompeu Fabra, ICREA): "LLMs as a synthesis between symbolic and distributed approaches to language".
+La tesi è che nei modelli di oggi la grammatica venga trattata in modo quasi simbolico, mentre la semantica lessicale resta distribuita. Porta una rassegna del lavoro di interpretabilità sulla sintassi.
+
+## BLOCCO cotterell
+@ cotterell|ryan|zurigo|surprisal|tautolog|babylm|psicolinguist
+Il 16 mattina, 11:30-13, invited talk di Ryan Cotterell (ETH Zurigo): "Surprisal Theory is Tautological (without Rational Grounding)".
+Sostiene che la surprisal theory diventa infalsificabile con famiglie di modelli senza vincoli, e propone di calibrarla su esperimenti psicolinguistici indipendenti. Cita la BabyLM Challenge.
+
+## BLOCCO tutorial
+@ tutorial|counterspeech|guerini|hate speech|misinformation|disinformazione
+Il 14 mattina, 9-12:30, il tutorial "Counterspeech Against Hate and Misinformation: An NLP Perspective" di Marco Guerini e Daniel Russo, all'Aula Magna.
+
+## BLOCCO panel
+@ panel|tavola rotonda|divulgazione|giornalis|raccontare l'ai|comunità scientifica
+Il 14 dalle 17 alle 18 il panel "Raccontare l'AI generativa: il ruolo della comunità scientifica", a Palazzo dei Normanni.
+
+## BLOCCO poster
+@ poster|bacheca|pannell|appeso|sessione poster
+Tre sessioni poster, tutte col caffè: il 15 alle 10:30 (ventuno lavori), il 15 alle 15:30 (ventotto) e il 16 alle 10:30 (ventisette). Si fanno sotto il portico dell'edificio 7.
+
+## BLOCCO orali
+@ sessione orale|paper|articolo|presentazione|chair|morfologia|traduzione|parsing|summarization|ruoli semantici|giochi di parole
+Le sessioni orali sono sette: due il 14 a Palazzo dei Normanni (gerarchie semantiche e proverbi; stereotipi di genere e linguaggio offensivo), tre il 15 (morfologia e traduzione; rappresentazioni dei modelli; multimodale e parlato), due il 16 (marcatori del discorso e riassunti; ruoli semantici, giochi di parole, RAG).
+Le presiedono Ludovica Pannitto, Arianna Muti, Dominique Brunato, Marco Polignano, Alessandro Mazzei, Alessio Palmero Aprosio e Fabio Tamburini.
+
+## BLOCCO cena
+@ cena|social dinner|terrazze|cassaro|quattro canti|ristorante|stasera|mangiamo
+La cena sociale è il 15 dalle 20 alle 23, alle Terrazze Cassaro ai Quattro Canti, Via Vittorio Emanuele 291. Serve il badge per entrare.
+Ci si arriva a piedi passando da Porta Nuova, il Corso Vittorio Emanuele e la Cattedrale.
+
+## BLOCCO welcome
+@ welcome|aperitivo|drink|brindisi|cortile|rinfresco
+Il 14 dalle 18:30 alle 20 il welcome drink nel cortile interno di Palazzo dei Normanni, subito dopo il panel.
+
+## BLOCCO assemblea
+@ assemblea|ailc|associazione|soci
+Il 15 dalle 17:30 alle 19 c'è l'assemblea AILC. Tanti ne approfittano per sparire prima della cena.
+
+## BLOCCO premi
+@ premio|premi|award|pianta|chiusura
+La chiusura con i premi è il 16 dalle 15:45 alle 16. C'è anche il premio Emanuele Pianta.
+
+## BLOCCO cibo
+@ mangiat|pranzo|cibo|arancin|panelle|sfincione|cannolo|granita|colazione|cornetto
+Si mangia street food dappertutto: arancine, panelle, sfincione, cassata, granita. Intorno al campus e nelle strade vicine ci sono posti per il pranzo.
+
+## BLOCCO mare
+@ mare|spiaggia|bagno|mondello|sferracavallo|addaura|nuotare
+A settembre si fa ancora il bagno. Le spiagge dove va la gente sono Mondello, Sferracavallo, l'Addaura.
+
+## BLOCCO giro
+@ ballarò|vucciria|mercato|cattedrale|monreale|centro storico|visitare|turista|quattro canti
+In centro ci sono i Quattro Canti, la Cattedrale, il mercato di Ballarò e quello della Vucciria, il Teatro Massimo. Ballarò verso sera sta chiudendo.
 
 ## PAROLE
-# Parole che dice solo chi è davvero qui. Servono a giudicare gli ALTRI, non a
-# scrivere: un ospite che in tutta la stanza non ne tocca nemmeno una, molto
-# probabilmente qui non c'è. Aggiungine quando ne nascono di nuove.
-# Geografia e dettagli che ti servono per esserci stato o esserti informato bene.
-ballarò vucciria politeama massimo normanni cassaro quattrocanti
-mondello sferracavallo capaci addaura foro-italico
-panelle sfincione cassata granita cannolo pane-e-panelle
-boleda cotterell ailc unipa palermobilità amat punta-raisi
-counterspeech surprisal
+# Parole che dice solo chi è davvero qui, o chi si è informato per bene.
+# Servono a GIUDICARE gli altri, non a scrivere.
+ballarò vucciria politeama massimo normanni cassaro mattarella
+mondello sferracavallo addaura foro-italico basile indipendenza orleans
+panelle sfincione cassata granita cannolo
+boleda cotterell guerini pannitto muti brunato polignano mazzei tamburini
+ailc unipa palermobilità amat prestia raisi babylm surprisal counterspeech
+portico gialla rossa
 
 ## PAROLE-OVVIE
-# Le sa chiunque abbia letto una riga sull'evento: non provano niente.
-palermo sicilia arancina arancine cattedrale duomo conferenza convegno
-poster talk sessione tutorial keynote paper badge caffè coffee break
-linguistica computazionale nlp
+# Sul sito della conferenza o su qualsiasi guida: non provano niente.
+# "L'arancina è femminile" sta sulla pagina turistica ufficiale sotto
+# "Local Humor", quindi ce l'ha chiunque abbia aperto il sito: vale zero.
+palermo sicilia arancina arancine femminile cattedrale duomo conferenza convegno
+poster talk sessione tutorial keynote paper badge caffè coffee break pranzo
+linguistica computazionale nlp clic-it palazzo
 
 ## PROGRAMMA
 2026-09-14 08:30-09:00 | Registrazione all'Aula Magna di Ingegneria, coda al banchetto dei badge.
-2026-09-14 09:00-12:30 | Tutorial "Counterspeech Against Hate and Misinformation", mezza mattinata.
+2026-09-14 09:00-12:30 | Tutorial sul counterspeech, di Guerini e Russo. Mezza mattinata.
 2026-09-14 12:30-14:00 | Pausa pranzo del primo giorno.
 2026-09-14 14:00-14:30 | Apertura della conferenza, a Palazzo dei Normanni.
-2026-09-14 14:30-15:30 | Prima sessione orale: gerarchie semantiche, proverbi, complessità. Due sale in parallelo.
+2026-09-14 14:30-15:30 | Prima sessione orale, a Palazzo dei Normanni: gerarchie semantiche, proverbi, complessità.
 2026-09-14 15:30-16:00 | Coffee break a Palazzo dei Normanni.
-2026-09-14 16:00-17:00 | Seconda sessione orale: gender profiling, linguaggio offensivo, advocacy.
+2026-09-14 16:00-17:00 | Seconda sessione orale: stereotipi di genere, linguaggio offensivo, disinformazione.
 2026-09-14 17:00-18:00 | Panel "Raccontare l'AI generativa".
-2026-09-14 18:30-20:00 | Welcome reception nel cortile di Palazzo dei Normanni.
+2026-09-14 18:30-20:00 | Welcome drink nel cortile di Palazzo dei Normanni.
 2026-09-15 09:00-10:30 | Terza sessione orale: morfologia, traduzione, cambiamento semantico. Sei lavori.
-2026-09-15 10:30-11:30 | Sessione poster col caffè.
-2026-09-15 11:30-13:00 | Invited talk di Gemma Boleda (Pompeu Fabra) sugli LLM come sintesi tra simbolico e distribuito.
+2026-09-15 10:30-11:30 | Prima sessione poster col caffè, sotto il portico dell'edificio 7.
+2026-09-15 11:30-13:00 | Invited talk di Gemma Boleda sugli LLM fra simbolico e distribuito.
 2026-09-15 13:00-14:00 | Pausa pranzo.
 2026-09-15 14:00-15:30 | Quarta sessione orale: rappresentazioni dei modelli, traduzione automatica.
 2026-09-15 15:30-16:30 | Seconda sessione poster col caffè.
-2026-09-15 16:30-17:30 | Quinta sessione orale: trascrizione, raccomandazione musicale, parsing.
-2026-09-15 17:30-19:00 | Assemblea AILC. Tanti ne approfittano per sparire.
+2026-09-15 16:30-17:30 | Quinta sessione orale: multimodale e riconoscimento del parlato.
+2026-09-15 17:30-19:00 | Assemblea AILC.
 2026-09-15 20:00-23:00 | Cena sociale alle Terrazze Cassaro ai Quattro Canti.
 2026-09-16 09:00-10:30 | Sesta sessione orale: marcatori del discorso, argomentazione, riassunti.
 2026-09-16 10:30-11:30 | Terza sessione poster col caffè.
-2026-09-16 11:30-13:00 | Invited talk di Ryan Cotterell (ETH Zurigo): la surprisal theory è tautologica senza fondamento razionale.
+2026-09-16 11:30-13:00 | Invited talk di Ryan Cotterell sulla surprisal theory.
 2026-09-16 13:00-14:00 | Ultima pausa pranzo.
 2026-09-16 14:00-15:45 | Settima sessione orale: ruoli semantici, giochi di parole, summarization, RAG.
 2026-09-16 15:45-16:00 | Chiusura e premi.
 
 ## FUORI
-06:00-08:30 | Colazione, cornetto e caffè al bar sotto l'albergo, ancora mezzo addormentato.
-16:00-19:00 | Giro in centro: Quattro Canti, la Cattedrale, il mercato di Ballarò che a quell'ora sta chiudendo.
-19:00-21:00 | Aperitivo o cena da qualche parte in centro, con altri della conferenza o da solo.
+06:00-08:30 | Colazione al bar, cornetto e caffè, ancora mezzo addormentato.
+16:00-19:00 | Giro in centro: Quattro Canti, la Cattedrale, Ballarò che a quell'ora sta chiudendo.
+19:00-21:00 | Aperitivo o cena in centro, con altri della conferenza o da solo.
 21:00-24:00 | Fuori a farsi un giro, o in albergo a smaltire la giornata.
 00:00-06:00 | In albergo, sveglio quando non dovresti.
