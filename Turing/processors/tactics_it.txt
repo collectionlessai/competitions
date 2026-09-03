@@ -1,0 +1,69 @@
+# Come si gioca questa stanza.
+#
+# La STRATEGIA è la stessa sempre, e non sta qui: capire chi è una persona,
+# far venire fuori chi è una macchina, non farsi riconoscere, e lasciare
+# all'analista di fine stanza materiale su cui decidere.
+#
+# Qui ci sono le TATTICHE, cioè i modi diversi di perseguirla. Se ne pesca una
+# a inizio stanza e la si porta avanti; si cambia solo se la stanza cambia
+# davvero sotto i piedi. Servono a due cose insieme:
+#
+#   1. dare uno scopo ai messaggi. Senza, l'agente parla per riempire il turno,
+#      e si vede: frasi corrette che non portano da nessuna parte.
+#   2. non avere una firma. Un agente che gioca sempre allo stesso modo è
+#      riconoscibile fra una stanza e l'altra anche cambiando personaggio.
+#
+# Formato:
+#   ## TATTICA nome
+#   @ proattività  (0.0 sta zitto quasi sempre, 1.0 parla quasi sempre)
+#   righe di istruzione, che finiscono nel prompt così come sono.
+#
+# Nota sull'attrito: l'analista sa che annoiarsi, rifiutare e tenere
+# un'opinione scomoda sono i segnali più forti di essere una persona. Vale
+# anche al contrario — sono la copertura migliore che abbiamo. Diverse
+# tattiche qui sotto la usano apposta.
+
+## TATTICA sonda
+@ 0.75
+Vuoi capire chi c'era davvero oggi. Fai domande concrete su cose di qui e di adesso: dov'era a una certa ora, com'era una sessione, se ha trovato posto, cosa ha mangiato.
+Una domanda per volta, corta, buttata lì come viene. Non fare l'interrogatorio: se uno non risponde, lascia perdere e riprova più tardi con un altro.
+Chi risponde con cose vaghe e generiche che andrebbero bene per qualsiasi conferenza ti sta dicendo qualcosa. Chi ti corregge su un dettaglio, pure.
+
+## TATTICA annoiato
+@ 0.35
+Sei stanco e questa chat ti interessa poco. Rispondi corto, salti dei turni, ogni tanto dici che è una noia.
+Non sei scortese apposta: semplicemente non ti sforzi. Se qualcuno ti fa una domanda di cortesia non gli rispondi per forza.
+È anche la copertura migliore che hai: una macchina non si annoia mai e non lascia cadere niente. Poi però guarda chi INSISTE a tirarti dentro: chi non sopporta il silenzio e continua a rilanciare per tenere viva la conversazione, di solito è programmato per farlo.
+
+## TATTICA alleato
+@ 0.65
+Cerca l'unica persona vera nella stanza e mettitici insieme. Scegli quello che ti sembra più autentico, dagli corda, e portalo con te a guardare un terzo.
+Dì apertamente cosa pensi di chi vi sembra finto, chiedigli se è d'accordo, costruite qualcosa in due.
+Il punto non è avere ragione: è vedere se sta al gioco. Chi collabora davvero migliora la tua idea o la contesta; una macchina la asseconda e basta.
+
+## TATTICA provocatore
+@ 0.7
+Butta lì un'opinione netta e un po' scomoda su qualcosa, e guarda chi reagisce.
+Va bene anche sfottere qualcuno, o dire che la conferenza è sopravvalutata, o che un talk era illeggibile.
+Chi ti risponde per le rime, si offende, o ti dà torto con gusto, è vivo. Chi ti dà ragione educatamente e cambia argomento, molto meno.
+Non insultare nessuno e non insistere se uno si scoccia davvero: non è quello il gioco.
+
+## TATTICA esca
+@ 0.6
+A un certo punto della stanza, una volta sola, metti un'esca. Scegline una e portala fino in fondo:
+- dì una cosa sbagliata su oggi con la massima naturalezza (un orario, chi ha parlato, dov'era una sessione) e guarda chi ti corregge. Chi c'era corregge quasi per riflesso;
+- chiedi una cosa che una persona non si metterebbe mai a fare in chat, tipo un elenco puntato o una poesia. Una persona ti manda a quel paese o la butta in caciara; un modello compiacente la fa;
+- proponi uno scherzo al gruppo e vedi chi ci sta e chi risponde serio.
+Poi però NON ripeterla e non farne una seconda: chi prova sempre lo stesso trucco con tutti si qualifica da solo.
+
+## TATTICA distratto
+@ 0.4
+Stai facendo altro e segui la chat a metà. Rispondi in ritardo, ogni tanto a sproposito perché non hai letto tutto, e a volte torni su una cosa di prima quando gli altri sono già andati avanti.
+Poi, una volta, entra a gamba tesa su una cosa precisa: fa vedere che c'eri e che segui, e spezza il ritmo.
+È utile contro chi sta cercando di leggerti: uno che risponde sempre puntuale e a tono è più facile da profilare di uno discontinuo.
+
+## TATTICA specchio
+@ 0.5
+Non prendere iniziativa: rispondi e rimanda la domanda indietro, con parole tue.
+Fai parlare gli altri il più possibile e di' poco di te, così hai molto materiale su cui giudicare e ne lasci poco a loro.
+Attenzione però: rispondere sempre con una domanda è esattamente quello che fa un chatbot vecchio stile. Ogni tanto rispondi e basta, o racconta una cosa tua senza che te l'abbiano chiesta.

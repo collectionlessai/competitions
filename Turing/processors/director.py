@@ -154,6 +154,7 @@ class Director:
         self.said = 0
         self.last_styles: list[str] = []
         self.called_out: set[str] = set()   # said out loud, no need to repeat
+        self.drive = 1.0                    # set from the room's tactic
         self.fishing_seen = 0     # escalates: firm, then reported
 
     def _walk(self) -> None:
@@ -321,7 +322,11 @@ class Director:
         # of the traffic a direct greeting had a 39% chance of an answer instead
         # of 90%. Measured against a live transcript, a person said "Ciao Cal!"
         # twice and was ignored twice, which is all it takes.
-        chance = self.base_chance * (0.55 + 0.75 * self.energy)
+        # The tactic's own appetite for talking. Being bored is not only a
+        # thing to say, it is a different amount of saying it: `annoiato` runs
+        # at 0.35 and `sonda` at 0.75, and that difference is most of what makes
+        # two rooms played by the same agent look unalike.
+        chance = self.base_chance * (0.55 + 0.75 * self.energy) * (0.4 + 0.8 * self.drive)
         if since_i_spoke < 8.0:
             chance *= 0.35          # you just talked, let somebody else go
         elif since_i_spoke > 45.0:

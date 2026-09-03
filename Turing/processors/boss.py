@@ -36,6 +36,7 @@ from processors.context import Context
 from processors.room import RoomSense
 from processors.director import Director
 from processors.pad import Pad
+from processors.tactics import Playbook
 from processors import humanise
 
 # The world logs the manager's status messages and nothing else, so a room can
@@ -360,6 +361,7 @@ class Boss(torch.nn.Module):
         self.my_vote: str | None = None   # cached, so a reminder gets the same answer
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
+        self.play = Playbook()          # which game this room is
         self.node_name = os.environ.get("BOSS_NODE", "boss")
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
@@ -469,6 +471,7 @@ class Boss(torch.nn.Module):
         (self.typing_cps, self.typo_chance, self.correct_chance,
          self.early_chance, self.device_pref) = read_style(self.persona)
         self._empty_conversation()
+        self.play.new_room(0.0)
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -599,6 +602,22 @@ class Boss(torch.nn.Module):
         if self.recent_openers:
             parts.append("NON INIZIARE il messaggio con queste parole, le hai già usate: "
                          + ", ".join(dict.fromkeys(self.recent_openers)))
+
+        # What this room is for, and how it is being played. The tactic gives
+        # the turn a purpose; without one the model writes correct Italian that
+        # goes nowhere, which is what the real hotel showed it doing — a
+        # question about a talk asked straight after two guests had ignored the
+        # same question, because the turn had to be filled and nothing said
+        # what for.
+        switched = self.play.reconsider(
+            self.sense.elapsed, self.sense.still_open(), self.sense.obvious_bots(),
+            beat.style in ("dueallavolta", "allea", "sonda"))
+        if switched and TRACE:
+            print(f"[boss~tattica] passo a {switched}", flush=True)
+
+        tactic = self.play.block()
+        if tactic:
+            parts.append(tactic)
 
         state = self.pad.game_state(self.sense.obvious_bots(), self.sense.still_open())
         if state:
@@ -1065,6 +1084,7 @@ class Boss(torch.nn.Module):
 
         last = messages[-1].text if messages else ""
         since = (self.sense.elapsed - self.last_spoke_at) if self.last_spoke_at >= 0 else 999.0
+        self.director.drive = self.play.drive
         beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
 
         if not beat.speak:
