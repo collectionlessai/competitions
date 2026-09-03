@@ -215,6 +215,46 @@ history is no longer a hazard (`_empty_conversation` does not use their
 rotation, so with `keep=80` a briefing can fall out of the window. Read that
 before merging, not after.
 
+### The night of 3-4 September: four iterations, measured
+
+Precision against a bench of known bots (three of the lab's own guests plus a
+second boss, so `nessuno` is right every time):
+
+| ver | change | rooms | right | FP/room | empty analyses | %persona |
+|---|---|---|---|---|---|---|
+| v1 | state of 3 Sept morning | 14 | 0 (0%) | 2.86 | - | - |
+| v2 | inverted analyst, two axes, fallback fix | 9 | 2 (22%) | 1.33 | 6/9 | 0% |
+| v4 | + block KB, tactics, resistance, quotes | 10 | 4 (40%) | 1.00 | 4/10 | 39% |
+| v5 | + a persona's private life is not evidence | 13 | 2 (15%) | 1.54 | 2/13 | 42% |
+| v6 | + a betting bar on [PERSONA] | 6 | 0 (0%) | 1.67 | 4/6 | 40% |
+| **v7** | + one line per person, never one word | 13 | **8 (61%)** | **0.69** | 3/13 | **4%** |
+
+**Three regressions, three unrelated causes, and none of them was "the prompt is
+badly written".** v4 looked best because the analyst was *silent* in four rooms
+of ten, and on an all-bot bench silence produces the right answer for the wrong
+reason. v5 made the analyst work more often and scored worse, because
+`[PERSONA]` was still too cheap. v6 added the calibration that fixes that and
+scored worse again, because the model started answering the whole analyst call
+with the single word `nessuno` — collapsing the per-guest analysis into the
+*vote's* question — and the empty-answer guard threw it away. One line of format
+("one row per participant, always; a one-word answer is not valid") let the
+calibration finally land: %persona 40% → 4%.
+
+**The gain is caution, not discernment.** All three surviving `[PERSONA]` rows
+in v7 are still wrong, and wrong the old way: a polite piece of advice
+("ricordati di prendere aria"), and a lab bot's own backstory ("il Po è pieno di
+sfide"). The frequency of the error dropped; the reasoning that produces it did
+not. On a bench with no humans the perfect calibration is `[PERSONA]` never, so
+**this bench cannot tell us where the bar actually landed** — only a real person
+in the room can.
+
+Also done: the knowledge base rebuilt from `clic2026.unipa.it` into 16
+regex-triggered blocks (context 1000 chars every turn → 481 cold; messages
+mentioning arancine 15% → 1%; a factual error found and fixed — the campus is
+*not* in the historic centre); seven tactics with their own proactivity (42%–62%
+of turns spoken) and three switching rules; a resistance section against our own
+tactics, which let the system prompt shrink.
+
 ### Faults seen in the real hotel, fixed or not
 
 **4. Nonsense with an invented word.** `"il talk della mummia mom0326 che deve
