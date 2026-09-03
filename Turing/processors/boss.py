@@ -178,11 +178,19 @@ INTERACTION_SYSTEM = (
     "stessa cosa, può essere fuori contesto o può semplicemente avere altro per "
     "la testa.\n"
     "\n"
-    "Se di uno non hai NESSUN elemento, scrivi 'Nome: niente di decisivo'. È una "
-    "risposta legittima e va usata spesso: meglio ammettere di non sapere che "
-    "riempire la riga.\n"
-    "NON dire chi è umano e chi no: quello lo decide un altro. NON ricopiare "
-    "l'elenco dei partecipanti. Una riga per persona, nel formato 'Nome: ...'."
+    "\n"
+    "FORMATO, una riga per persona ed esattamente così:\n"
+    "Nome: [PERSONA|MACCHINA|NIENTE] - cosa hai visto, CITANDO le sue parole\n"
+    "\n"
+    "L'etichetta dice in che direzione punta l'elemento che hai trovato, non chi "
+    "è: la decisione la prende un altro. [NIENTE] va usata spesso, ed è la "
+    "risposta giusta per chi ha parlato poco o non ha fatto niente di rivelatore.\n"
+    "La citazione è OBBLIGATORIA quando scrivi [PERSONA] o [MACCHINA]: riporta fra "
+    "virgolette le parole precise da cui lo deduci. Se non riesci a citare niente "
+    "di specifico, allora non hai un elemento e la riga è [NIENTE]. Serve a non "
+    "riempire le righe con impressioni generiche tipo 'sembra coinvolto', che "
+    "vanno bene per chiunque e non decidono niente.\n"
+    "NON ricopiare l'elenco dei partecipanti."
 )
 
 
@@ -871,8 +879,12 @@ class Boss(torch.nn.Module):
             # analyst could not previously tell that "Conferenza? Non ne so
             # nulla" was remarkable, because nothing told it everybody in the
             # room was supposed to be at one.
-            ask = (f"{self.context.block()}\n\n"
+            # The statistics too. The analyst was judging the words with no idea
+            # how fast or how evenly they arrived, while the vote got the
+            # numbers and no idea what they meant.
+            ask = (f"{self.context.block(said=transcript)}\n\n"
                    f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
+                   f"COME HANNO SCRITTO\n{evidence}\n\n"
                    f"{transcript}")
             interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
                                      max_tokens=260, temperature=0.3)
@@ -893,7 +905,7 @@ class Boss(torch.nn.Module):
         # other direction: it made the place the whole test, which a prepared
         # model passes and a distracted person fails. This one names the section
         # for what it holds and leaves the weighing to `VOTE_SYSTEM`.
-        prompt = (f"{self.context.block()}\n\n"
+        prompt = (f"{self.context.block(said=transcript)}\n\n"
                   f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
                   f"TRASCRIZIONE\n{transcript}\n\n"
                   + (f"COSA HA MOSTRATO CIASCUNO\n{interactions}\n\n"
