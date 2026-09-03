@@ -516,3 +516,61 @@ def load_lines(path, section: str) -> list:
         elif live and line and not line.startswith("#"):
             out.append(line)
     return out
+
+
+def drop_self_reference(text: str, mine: str, others=()) -> str:
+    """Take our own room name back out of our own message.
+
+    The prompt says plainly "NON firmare i messaggi e non dire il tuo nome: si
+    vede già", and the model does it anyway. Live in the competition hotel it
+    produced "ciao qua zon, prima volta a palermo" and "ciao gente, qui zia" —
+    nobody announces their own name in a chat that already prints it beside
+    every line, so it is a tell we manufacture ourselves.
+
+    It also fixes the uglier version of the same slip: "zia bob, hai fatto il
+    talk sulle panelle?", where our persona name got welded to the name of the
+    guest being addressed. Whatever the model meant, the room reads two names.
+
+    The whole introducing phrase goes, not just the name. Deleting the word on
+    its own leaves "ciao qua," which is worse than what it replaced.
+    """
+    if not mine:
+        return text
+    me = re.escape(mine)
+    out = text
+
+    # "zia bob, ..." — our name glued in front of somebody else's
+    for other in others:
+        if other and other.lower() != mine.lower():
+            out = re.sub(rf"\b{me}\s+(?={re.escape(other)}\b)", "", out, flags=re.IGNORECASE)
+
+    # "qui zon", "qua zon", "sono zon", "zon qui" — the whole introduction
+    out = re.sub(rf"\b(?:qui|qua|sono|io sono)\s+{me}\b", "", out, flags=re.IGNORECASE)
+    out = re.sub(rf"\b{me}\s+(?:qui|qua)\b", "", out, flags=re.IGNORECASE)
+
+    # ...and any bare leftover of it
+    out = re.sub(rf"\b{me}\b", "", out, flags=re.IGNORECASE)
+
+    # Tidy what the removal left: doubled spaces, a comma with nothing before
+    # it, a message that now opens on punctuation.
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"\s+([,.;!?])", r"\1", out)
+    out = re.sub(r"([,;])\s*\1+", r"\1", out)
+    out = re.sub(r"^[\s,;.]+", "", out)
+    # A comma left hanging off the end reads worse than the name did:
+    # "ciao gente, qui zia" must not become "ciao gente,". Question and
+    # exclamation marks stay — they were doing something.
+    out = re.sub(r"[\s,;.]+$", "", out)
+    return out or text
+
+
+# A token with three or more digits welded to letters. People do not type these;
+# a model that has lost the thread does. Live it emitted "il talk della mummia
+# mom0326 che deve maledire tutti" — grammatical Italian, no foreign script, no
+# assistant register, so every other guard passed it through.
+INVENTED = re.compile(r"\b(?:[a-zà-ÿ]{2,}\d{3,}|\d{3,}[a-zà-ÿ]{2,})\b", re.IGNORECASE)
+
+
+def has_invented_token(text: str) -> bool:
+    """Whether the message contains a made-up identifier-looking word."""
+    return bool(INVENTED.search(text))

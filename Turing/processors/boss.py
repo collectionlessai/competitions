@@ -749,6 +749,19 @@ class Boss(torch.nn.Module):
                 print(f"[boss--] ripetizione {reply!r}", flush=True)
             return ""
 
+        # A word nobody typed. Not a style problem — the message has stopped
+        # meaning anything, so it goes rather than gets tidied, the same way a
+        # broken-character reply does.
+        if humanise.has_invented_token(reply):
+            self._journal("dropped", text=reply, why="parola inventata")
+            if TRACE:
+                print(f"[boss--] parola inventata {reply!r}", flush=True)
+            return ""
+
+        # Our own name, out of our own mouth. Both the announcement
+        # ("ciao qua zon") and the weld onto somebody else's ("zia bob, ...").
+        reply = humanise.drop_self_reference(reply, self.sense.my_name, self.sense.heard)
+
         reply = humanise.drop_maskable(reply)
         reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)
         reply = humanise.cap_words(reply, beat.max_words)
