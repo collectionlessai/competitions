@@ -62,11 +62,9 @@ class Pad:
     def __init__(self, keep: int = 8):
         self.keep = keep
         self.notes: list[Note] = []
-        self.profiles: dict[str, str] = {}
 
     def clear(self) -> None:
         self.notes = []
-        self.profiles = {}
 
     def add(self, kind: str, text: str, about: str = "", ttl: float = 120.0) -> Note:
         note = Note(kind, text, about, ttl)
@@ -91,18 +89,6 @@ class Pad:
     def open_bait(self):
         baits = self.live("bait")
         return baits[-1] if baits else None
-
-    def profile(self, name: str, text: str = "") -> str:
-        """What we make of one guest: written to when given text, read otherwise.
-
-        This is the actor's scratchpad, not the judge's. It is here to socialise
-        with: what this person seems to be, what they said they were up to, how
-        they write. Whether they are a machine is a separate question asked at
-        the end, from scratch, by somebody with a different job.
-        """
-        if text:
-            self.profiles[name] = text
-        return self.profiles.get(name, "")
 
     def read_of(self, name: str) -> str:
         """What we last decided about one guest."""
@@ -142,7 +128,6 @@ class Pad:
         claims = [n.text for n in self.live("claim")]
         plan = self.open_plan()
         reads = [f"{n.about}: {n.text}" for n in self.live("read") if n.about]
-        people = [f"{who}: {what}" for who, what in self.profiles.items() if what]
 
         lines = []
         if claims:
@@ -153,8 +138,6 @@ class Pad:
                          "Stai sul pezzo: portala avanti, difendila se ti sfottono, "
                          "prendi in giro chi non ci sta, o rilanciala cambiandola. "
                          "Non cambiare argomento come se non l'avessi mai detta.")
-        if people:
-            lines.append("Che tipi ti sembrano: " + " | ".join(people))
         if reads:
             lines.append("Cosa pensi degli altri finora: " + "; ".join(reads[-3:]))
 

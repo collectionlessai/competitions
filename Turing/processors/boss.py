@@ -370,7 +370,6 @@ class Boss(torch.nn.Module):
         self.hellos = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "SALUTO")
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
-        self._profiled_at = 0                     # messages seen at last profiling
 
         # Running averages the timing filter reads back through
         # `opts["agent"].proc.module`. It has to budget for typing before the
@@ -446,7 +445,6 @@ class Boss(torch.nn.Module):
          self.early_chance, self.device_pref) = read_style(self.persona)
         self.conv.reset()
         self.pad.clear()
-        self._profiled_at = 0
         self.director.new_room()
         self.pending_correction = ""
         self.pending_tail = ""
@@ -775,8 +773,24 @@ class Boss(torch.nn.Module):
 
         transcript = self.conv.transcript(limit=60)
         evidence = self.sense.evidence()
-        scores = "\n".join(f"{name}: indice di artificialità {score:.2f}"
-                           for name, score in self.sense.ranked())
+
+        # Two axes, written out in words. A single number could not say the
+        # difference between "not enough to tell" and "the evidence disagrees
+        # with itself", and the vote treated both as a middling suspicion.
+        rows = []
+        for name, (human, bot) in self.sense.readings().items():
+            if human < 0.2 and bot < 0.2:
+                verdict = "quasi nessun elemento in nessuna delle due direzioni"
+            elif human >= 0.4 and bot >= 0.4:
+                verdict = "elementi in CONTRASTO, decidi tu guardando la trascrizione"
+            elif bot > human:
+                verdict = "qualche elemento da macchina"
+            elif human > bot:
+                verdict = "qualche elemento da persona"
+            else:
+                verdict = "niente di netto"
+            rows.append(f"{name}: persona {human:.2f} / macchina {bot:.2f} — {verdict}")
+        scores = "\n".join(rows)
 
         # Work out what happened between people BEFORE judging it. Two cheap
         # calls inside a 240-second window we were using five seconds of, and
@@ -824,7 +838,9 @@ class Boss(torch.nn.Module):
                   + (f"COSA HA MOSTRATO CIASCUNO\n{interactions}\n\n"
                      if interactions else "")
                   + f"STATISTICHE\n{evidence}\n\n"
-                  f"PUNTEGGI AUTOMATICI (0 = sembra una persona, 1 = sembra un modello)\n"
+                  f"PUNTEGGI AUTOMATICI (due misure separate, 0 = nessun elemento, "
+                  f"1 = elementi forti. Sono un indizio debole: se la trascrizione "
+                  f"dice il contrario, fidati della trascrizione)\n"
                   f"{scores}\n\n"
                   "Chi era una persona vera?")
 

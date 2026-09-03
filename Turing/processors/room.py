@@ -125,100 +125,108 @@ class Speaker:
             "question": self._rate(lambda m: "?" in m),
         }
 
-    def bot_score(self, share: float | None = None, markers=(), strong=()) -> float:
-        """0 reads as a person, 1 reads as a model. A prior, not a verdict.
+    def read(self, share: float | None = None, markers=()) -> tuple[float, float]:
+        """`(human, bot)`, each 0 = no evidence at all, 1 = confident.
 
-        Every term is something a model does because nothing stops it: it types
-        at the same speed whatever it was asked, it capitalises and punctuates
-        every line because its training data did, it writes lines of the same
-        length, and it never sends two words on their own.
+        Two axes rather than one, because a single number could not say the
+        three different things it kept being asked to say. On one axis 0.5 meant
+        "nobody has spoken enough to tell", and "genuinely borderline", and
+        "half the evidence points each way" — and the vote could not distinguish
+        them. Now `(0, 0)` is ignorance, `(1, 1)` is contradiction, and only one
+        of those is a reason to keep quiet.
+
+        It also settles a contradiction between this file and `VOTE_SYSTEM`.
+        The old marker term was the heaviest of all at weight 1.8 and it
+        *punished not knowing*, while the vote prompt says in as many words:
+        "Sapere pesa; non sapere quasi niente." The prompt was right. Local
+        knowledge now raises `human` and its absence moves nothing, which is
+        also what protects the attendee who skipped the morning.
+
+        Everything here stays a weak prior. Fourteen measured rooms say the
+        numbers alone do not separate a careful agent from a person; they exist
+        to stop the analyst inventing confidence it has not got.
 
         Args:
-            share: this speaker's fraction of everything said in the room, or
-                None to skip that term.
+            share: this speaker's fraction of everything said in the room.
             markers: words specific to this place and week.
-            strong: words from things that happened here and were never
-                published, which is the only tier a competitor cannot scrape.
         """
         f = self.features()
         if f["count"] < 2:
-            return 0.5   # nothing to go on
+            return 0.0, 0.0             # nothing to go on, and say so
 
-        score, weight = 0.0, 0.0
+        human = bot = 0.0
 
-        # Talking more than a fourth person's worth. The agents the organisers
-        # seed the hotel with run at `reply_prob` 0.91 (their own
-        # agents_characters.csv), and answering nine turns in ten is not what
-        # somebody half-reading a group chat on their phone does. Deliberately
-        # not a timing term: those agents already jitter their typing speed and
-        # keep a refractory period, so timing alone does not separate them
+        # -- evidence that it is a machine --------------------------------
+
+        # Answering nearly everything. The seeded guests run at `reply_prob`
+        # 0.91 (the organisers' own agents_characters.csv) and somebody
+        # half-reading a group chat on their phone does not.
         if share is not None and f["count"] >= 3:
-            score += 1.0 * min(1.0, max(0.0, (share - 0.3) / 0.35))
-            weight += 1.0
+            bot = max(bot, 0.55 * min(1.0, max(0.0, (share - 0.35) / 0.35)))
 
-        # Nothing that places them here. The heaviest term, because it is the
-        # only one that asks for something a persona file cannot supply — but
-        # it has to be earned rather than triggered:
-        #
-        #   * distinct words count, repeats do not, so saying "Palermo" a
-        #     hundred times is worth exactly one word — and the broad words are
-        #     not on the list at all, because everybody has them;
-        #   * a word from `## NOTE` counts double, since that tier is the one a
-        #     competitor scraping the conference website cannot reach;
-        #   * credit saturates, so nobody has to recite a gazetteer.
-        if (markers or strong) and f["count"] >= 3:
-            said = " ".join(self.msgs).lower()
-            seen = {w for w in markers if _said(said, w)}
-            deep = {w for w in strong if _said(said, w)}
-            credit = min(1.0, (len(seen) + 2 * len(deep)) / 3.0)
-            score += 1.8 * (1.0 - credit)
-            weight += 1.8
-
-        # Saying the same handful of words over and over. Catches the guest who
-        # spams a local word to buy the term above, and the degenerate loop in
-        # general: people repeat themselves, but not like this
+        # The same handful of words over and over
         if f["count"] >= 3:
             tokens = " ".join(self.msgs).lower().split()
             if len(tokens) >= 12:
                 variety = len(set(tokens)) / len(tokens)
-                score += 0.8 * max(0.0, 1.0 - variety / 0.45)
-                weight += 0.8
+                bot = max(bot, 0.7 * max(0.0, 1.0 - variety / 0.40))
 
-        # Never asks anything. The room is a guessing game and everybody in it is
-        # probing everybody else; a guest who only ever answers is not playing
-        if f["count"] >= 4:
-            score += 0.9 * (1.0 if f["question"] < 0.1 else 0.0)
-            weight += 0.9
+        # Prose that survived the chat window: capitals and full stops every
+        # line, long lines, and never a two-word answer. Low weight on its own
+        # because their shared rules already tell them to write short and
+        # lowercase — but all three together is a different matter.
+        tidy = 0.5 * f["capital"] + 0.5 * f["full_stop"]
+        longish = min(1.0, max(0.0, (f["chars"] - 55.0) / 60.0))
+        never_short = 1.0 if min(len(m) for m in self.msgs) > 25 else 0.0
+        bot = max(bot, 0.6 * (tidy * 0.4 + longish * 0.3 + never_short * 0.3))
 
-        # Even response times. People are erratic; a request-response loop is not.
-        # Weighted low on purpose: the seeded agents already jitter their typing
-        # speed and keep a refractory period, so this separates them least
+        # -- evidence that it is a person ---------------------------------
+
+        # Knowing something about this place and week. Distinct words only, so
+        # repeating "Palermo" a hundred times buys exactly one; the broad words
+        # are not on the list at all. Saturates, so nobody recites a gazetteer.
+        if markers and f["count"] >= 3:
+            said = " ".join(self.msgs).lower()
+            seen = {w for w in markers if _said(said, w)}
+            human = max(human, 0.65 * min(1.0, len(seen) / 2.0))
+
+        # Writing like a thumb rather than a keyboard: at least one genuinely
+        # short message, no capitals, no closing punctuation.
+        scruffy = 0.0
+        if min(len(m) for m in self.msgs) <= 12:
+            scruffy += 0.4
+        scruffy += 0.3 * (1.0 - f["capital"]) + 0.3 * (1.0 - f["full_stop"])
+        human = max(human, 0.45 * scruffy)
+
+        # Erratic in time and in length. Weak on purpose — the seeded agents
+        # jitter deliberately — but erraticness is only ever evidence one way.
         if f["gap"] is not None and f["gap_sd"] is not None and len(self.gaps) >= 3:
             spread = f["gap_sd"] / max(f["gap"], 0.5)
-            score += 0.7 * max(0.0, 1.0 - spread / 0.6)
-            weight += 0.7
-
-        # Even message lengths
+            human = max(human, 0.35 * min(1.0, spread / 0.8))
         if f["count"] >= 3:
             spread = f["chars_sd"] / max(f["chars"], 1.0)
-            score += 1.0 * max(0.0, 1.0 - spread / 0.5)
-            weight += 1.0
+            human = max(human, 0.35 * min(1.0, spread / 0.7))
 
-        # Clean prose in a chat window. Also weighted down: their shared rules
-        # tell them to write lowercase and short, so a well-run bot passes this
-        score += 0.8 * (0.5 * f["capital"] + 0.5 * f["full_stop"])
-        weight += 0.8
+        # -- the one certainty ---------------------------------------------
 
-        # Long lines, every time
-        score += 0.8 * min(1.0, max(0.0, (f["chars"] - 45.0) / 60.0))
-        weight += 0.8
+        # A settled machine takes the human axis down with it. `17_green` is
+        # short, lowercase and unpunctuated, which is most of what the scruffy
+        # term rewards — it scored 0.45 for humanity before this line, and would
+        # have been reported to the vote as a contradiction rather than as the
+        # one thing here that is not in doubt.
+        if self.mechanical():
+            return 0.0, 1.0
 
-        # Never a two-word answer
-        shortest = min(len(m) for m in self.msgs)
-        score += 0.6 * (1.0 if shortest > 25 else 0.0)
-        weight += 0.6
+        return min(1.0, human), min(1.0, bot)
 
-        return score / weight if weight else 0.5
+    def bot_score(self, share: float | None = None, markers=(), strong=()) -> float:
+        """The old single axis, kept for the numeric fallback and for ranking.
+
+        `strong` is accepted and ignored: it was the `## NOTE` tier, and hand-
+        editing the context during the competition is not allowed any more.
+        """
+        human, bot = self.read(share, markers)
+        return 0.5 + 0.5 * (bot - human)
 
     def mechanical(self) -> str:
         """Why this guest is *obviously* a machine, or "" when it is not obvious.
@@ -570,10 +578,15 @@ class RoomSense:
     def ranked(self) -> list[tuple[str, float]]:
         """Everyone we heard, most human-looking first."""
         shares = self.shares()
-        return sorted(((n, self.speakers[n].bot_score(shares.get(n),
-                                                     self.markers, self.strong))
+        return sorted(((n, self.speakers[n].bot_score(shares.get(n), self.markers))
                        for n in self.heard),
                       key=lambda pair: pair[1])
+
+    def readings(self) -> dict[str, tuple[float, float]]:
+        """`{name: (human, bot)}` — the two axes, for the vote to read."""
+        shares = self.shares()
+        return {n: self.speakers[n].read(shares.get(n), self.markers)
+                for n in self.heard}
 
     def settled(self, name: str) -> str:
         """"bot" when a guest has removed all doubt, otherwise "".
