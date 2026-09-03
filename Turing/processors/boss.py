@@ -1057,7 +1057,14 @@ class Boss(torch.nn.Module):
                       and not self.sense._is_manager(m.speaker)
                       and not self.sense.settled(m.speaker)
                       and humanise.is_greeting(m.text)]
+        # Once per room, and only before we have said anything else. The reflex
+        # hello is here to cover the silence at the door; once we are already
+        # talking it covers nothing and just adds a second greeting. Live it
+        # produced "ciao!" and then "eccomi" inside one room, with nothing in
+        # between, because the guard was a 25-second cooldown rather than a
+        # once-only.
         if (turn.kind == "chat" and self.hellos and greeted_by
+                and self.director.said == 0
                 and self.sense.elapsed - self.last_greeted > 25.0):
             self.last_greeted = self.sense.elapsed
             line = random.choice([h for h in self.hellos if h not in self.recent_mine]
