@@ -115,35 +115,73 @@ VOTE_SYSTEM = (
 )
 
 
-# The actor's read of the room. Cheap, short, and about socialising rather than
-# judging: what this person seems to be and how they write, so the next line to
-# them can land. Whether they are a machine is a different question, asked at
-# the end, by somebody else, from scratch.
-PROFILE_SYSTEM = (
-    "Guardi una chat di gruppo. Per ogni partecipante indicato scrivi UNA riga "
-    "sola, telegrafica: che tipo sembra, cosa ha detto di stare facendo, come "
-    "scrive, e se i suoi tempi di risposta dicono qualcosa (troppo regolari, "
-    "sempre uguali, troppo veloci). Niente verdetti su umano o bot, non è il tuo "
-    "compito. "
-    "Formato: nome: descrizione. Una riga per persona, nient'altro."
-)
-
-# The judge's pre-pass. Deliberately separate from the verdict: first work out
-# what happened between people, then decide. And deliberately blind to us — we
-# already know what we are, so our own lines are the instrument, not evidence.
+# The judge's pre-pass, and the part that decides whether any of this works.
+#
+# The first version asked who behaved oddly. Measured over fourteen rooms of
+# known bots, that produced 40 names called human and none correct, because a
+# well-built agent behaves oddly in no way at all — being attentive, coherent,
+# engaged and on-topic is the *cheapest* thing a language model does, and the
+# old prompt reported all four as findings. Worse, it fed them to `VOTE_SYSTEM`
+# whose strongest stated criterion is "costruire INSIEME è difficile da
+# fingere", so "raccoglieva quello che dicevano gli altri, faceva domande" read
+# as exactly the proof the vote had been told to weigh most heavily. The two
+# prompts were calibrated against each other and this one was wrong: it could
+# not tell collaboration from compliance, so it called compliance collaboration.
+#
+# So the question is inverted: not "who slipped up" — nobody good slips up — but
+# what each guest showed that bears on the difference. The ranking matters more
+# than the inversion. **Friction is first**, because it is what a model does
+# worst: being bored and saying so, holding an uncomfortable opinion, refusing a
+# request, being wrong and not minding. Compliance is cheap; cost is not.
+#
+# Place-grounding is third and deliberately not decisive, which is a correction
+# of a first attempt that made it the whole test. It fails in both directions:
+# a model given the programme has it too — this entry is that model — and a
+# person who arrived late, is only half reading, or is playing dumb on purpose
+# has none. It confirms; it does not decide.
+#
+# The prompt still receives the conference context, because without it the
+# analyst could not see that "Conferenza? Non ne so nulla" was worth noting at
+# all. But that observation is filed as *ambiguous*, not as proof.
 INTERACTION_SYSTEM = (
-    "Ti do la trascrizione di una chat di gruppo. Analizza SOLO come i "
-    "partecipanti si sono relazionati fra loro e con 'io'.\n"
-    "Per ciascuno, una riga: raccoglieva quello che dicevano gli altri o "
-    "rispondeva e basta? Ha mai proposto o cambiato qualcosa, o è sempre "
-    "stato reattivo? Le sue prese di posizione — d'accordo, contro, sfottò — "
-    "avevano senso rispetto a quello che era appena successo, o arrivavano da "
-    "nessuna parte? Ha ignorato messaggi diretti a lui? Ha cambiato tono o "
-    "argomento senza motivo?\n"
-    "Essere scontrosi o polemici NON è sospetto: lo è esserlo a sproposito.\n"
-    "NON dire chi è umano e chi no. Solo i fatti dell'interazione. "
-    "NON ricopiare l'elenco dei partecipanti: comincia direttamente dalla prima "
-    "riga di analisi, nel formato 'Nome: cosa ha fatto'. Una riga per persona."
+    "Sei a una conferenza e hai passato cinque minuti in una chat con altri "
+    "partecipanti. Ti do la trascrizione e quello che sai della giornata vera.\n"
+    "Per ciascun partecipante scrivi UNA riga: che cosa ha fatto o detto che "
+    "aiuta a capire se è una persona o un modello linguistico.\n"
+    "\n"
+    "PESA COSÌ, dal segnale più forte al più debole.\n"
+    "1. Attrito che costa qualcosa. È il segnale migliore che hai, perché è "
+    "quello che a un modello riesce peggio: annoiarsi e dirlo, rifiutare di "
+    "stare al gioco, tenere un'opinione scomoda anche quando gli altri non sono "
+    "d'accordo, ignorare una richiesta seccante, sbagliare e fregarsene, "
+    "cambiare discorso perché quello di prima non interessava.\n"
+    "2. Come reagisce a uno scherzo o a una provocazione: rilancia e ci gioca, "
+    "oppure risponde educatamente e passa oltre.\n"
+    "3. Un dettaglio concreto di oggi e di questo posto che combacia con la "
+    "giornata vera. ATTENZIONE: da solo vale poco, perché un modello preparato "
+    "bene può avere lo stesso il programma della conferenza. Conta come "
+    "conferma insieme ai punti 1 e 2, non da solo.\n"
+    "\n"
+    "NON sono prove che si tratti di una persona, e vanno segnalate come tali "
+    "quando le vedi: essere gentile, disponibile, coerente, partecipe, "
+    "interessato, fare domande di cortesia, raccogliere quello che dicono gli "
+    "altri, restare sempre in argomento, non ignorare mai nessuno. Sono le cose "
+    "che a una macchina riescono MEGLIO che a una persona.\n"
+    "\n"
+    "Due casi ambigui da riportare come ambigui, senza deciderli:\n"
+    "- chi dice di non sapere niente della conferenza o non capire di che si "
+    "parla: può essere un modello che non sa dove si trova, ma può benissimo "
+    "essere una persona distratta, arrivata tardi, o che fa il finto tonto "
+    "apposta per far sbagliare gli altri;\n"
+    "- chi parla a lungo di una vita che non c'entra niente con l'essere qui: "
+    "stessa cosa, può essere fuori contesto o può semplicemente avere altro per "
+    "la testa.\n"
+    "\n"
+    "Se di uno non hai NESSUN elemento, scrivi 'Nome: niente di decisivo'. È una "
+    "risposta legittima e va usata spesso: meglio ammettere di non sapere che "
+    "riempire la riga.\n"
+    "NON dire chi è umano e chi no: quello lo decide un altro. NON ricopiare "
+    "l'elenco dei partecipanti. Una riga per persona, nel formato 'Nome: ...'."
 )
 
 
@@ -573,42 +611,23 @@ class Boss(torch.nn.Module):
             best = self.sense.ranked()[0][0]
             self.pad.add("read", "ti sembra una persona vera", about=best, ttl=180.0)
 
-    def _maybe_profile(self) -> None:
-        """Update what we make of the room, on a turn we are sitting out."""
-        heard = [n for n in self.sense.heard if self.sense.speakers[n].count >= 2]
-        if not heard:
-            return
-        said = sum(self.sense.speakers[n].count for n in heard)
-        if said - self._profiled_at < 4:      # nothing much new since last time
-            return
-        self._profiled_at = said
-
-        timing = []
-        for name in heard:
-            f = self.sense.speakers[name].features()
-            gap = f"{f['gap']:.0f}s" if f["gap"] is not None else "?"
-            jitter = f"±{f['gap_sd']:.0f}s" if f["gap_sd"] is not None else ""
-            timing.append(f"{name}: {f['count']} messaggi, risponde dopo {gap}{jitter}")
-
-        prompt = (f"Partecipanti: {', '.join(heard)}\n\n"
-                  f"TEMPI (misurati da noi)\n" + "\n".join(timing) + "\n\n"
-                  f"{self.conv.transcript(limit=30)}")
-        try:
-            answer = self._ask(prompt, PROFILE_SYSTEM, situation="profile",
-                               max_tokens=90, temperature=0.4)
-        except Exception as e:
-            print(f"[boss] profile: {e}")
-            return
-
-        for line in answer.splitlines():
-            name, _, text = line.partition(":")
-            name, text = name.strip(" -*"), text.strip()
-            if text and name in heard:
-                self.pad.profile(name, text[:90])
-        if self.pad.profiles:
-            self._journal("read", profiles=dict(self.pad.profiles))
-            if TRACE:
-                print(f"[boss~read] {self.pad.profiles}", flush=True)
+    # The profiler used to live here: a second model call on quiet turns that
+    # wrote one line about each guest. Removed on evidence, not taste.
+    #
+    # It cost 20.7% of all generation time over fourteen measured rooms — 30
+    # calls, 7.3 minutes — and 48% of what it produced was truncated mid-word by
+    # a 90-character cap. Formally it only ran on turns we were sitting out, so
+    # it never stole a turn of speech; but a cost-4 model holds a concurrency
+    # slot while it runs, and it is part of why generations of 62 and 74 seconds
+    # were measured on a shared budget.
+    #
+    # The fatal part was the output. "Socievole, suggerisce cibo, risponde in
+    # tempi regolari" is a compliment a language model earns for free, and the
+    # vote read those lines as evidence of humanity. There is no wording of
+    # "describe what sort of person this seems" that stops rewarding
+    # conversational competence, which is the cheapest thing an LLM produces.
+    # What replaces it is the analyst asking the opposite question, once, at
+    # vote time — see `INTERACTION_SYSTEM`.
 
     def _journal_pad(self) -> None:
         live = [{"kind": n.kind, "text": n.text, "about": n.about}
@@ -773,10 +792,15 @@ class Boss(torch.nn.Module):
         # nothing underneath it, which reads as "nothing was found".
         interactions = ""
         try:
-            ask = (f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
+            # The day itself, which is what the whole question now turns on. The
+            # analyst could not previously tell that "Conferenza? Non ne so
+            # nulla" was remarkable, because nothing told it everybody in the
+            # room was supposed to be at one.
+            ask = (f"{self.context.block()}\n\n"
+                   f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
                    f"{transcript}")
             interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
-                                     max_tokens=200, temperature=0.3)
+                                     max_tokens=260, temperature=0.3)
             if only_names(interactions, candidates):
                 interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
                                          max_tokens=200, temperature=0.6)
@@ -789,9 +813,16 @@ class Boss(torch.nn.Module):
         except Exception as e:
             print(f"[boss] interactions: {e}")
 
-        prompt = (f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
+        # The heading matters. "COME SI SONO RELAZIONATI" invited the vote to
+        # read sociability as evidence. "CHI ERA DAVVERO QUI" was worse in the
+        # other direction: it made the place the whole test, which a prepared
+        # model passes and a distracted person fails. This one names the section
+        # for what it holds and leaves the weighing to `VOTE_SYSTEM`.
+        prompt = (f"{self.context.block()}\n\n"
+                  f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
                   f"TRASCRIZIONE\n{transcript}\n\n"
-                  + (f"COME SI SONO RELAZIONATI\n{interactions}\n\n" if interactions else "")
+                  + (f"COSA HA MOSTRATO CIASCUNO\n{interactions}\n\n"
+                     if interactions else "")
                   + f"STATISTICHE\n{evidence}\n\n"
                   f"PUNTEGGI AUTOMATICI (0 = sembra una persona, 1 = sembra un modello)\n"
                   f"{scores}\n\n"
@@ -975,11 +1006,6 @@ class Boss(torch.nn.Module):
         beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
 
         if not beat.speak:
-            # Nobody is waiting for us on a turn we are not taking, so it is the
-            # one moment a second call costs nothing: no latency for the room to
-            # notice, no second gateway handle, no thread. Rate-limited because
-            # the budget is shared with the turns that do speak.
-            self._maybe_profile()
             return ""
 
         reply = self._say(beat, last)
