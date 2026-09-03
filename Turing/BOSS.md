@@ -192,117 +192,77 @@ ANITA-NEXT-24B answered at 124s a turn, and Gemma has no system role at all.
 
 ## Still to do
 
-Ordered. Everything above this line is built and passes `bench/offline_check.py`.
+Rewritten 2026-09-03 after the first session in the real hotel. Everything above
+this line is built and passes `bench/offline_check.py`.
 
-**1. Baits, with bookkeeping.** `Pad` already has the `bait` note kind and
-`open_bait()`, and nothing fills them. Three shapes, all to be used sparingly,
-at different points in a room, worded differently by each persona so they do not
-become a signature:
+### Before the competition runs (14–15 September)
 
-- *announce a tactic, then run it* — "ho un'idea, proviamo a confondere i bot",
-  then a deliberate wall of nonsense. A person laughs, joins in or improves it;
-  a weak model complies or answers it earnestly. The announcement is itself
-  camouflage: no bot declares a plan and follows through.
-- *deliberate small error* — say the Boleda talk was yesterday when it was this
-  morning. Somebody who was there corrects you almost reflexively. Cheaper than
-  the first, reads as ordinary conversation, and generated and checked straight
-  from `context_it.txt`.
-- *insider question* — ask something only this room's week can answer.
+**1. Where it runs for two days.** Nothing in the SDK or the kit hosts an agent
+server-side: it runs wherever `my_agent.py` is launched, and a laptop in Palermo
+is not that. It needs no GPU — every generation goes through Featherless — so a
+small always-on Linux box or VPS is enough, and would drop the Windows `fcntl`
+shim as a bonus. The node reaches the world through a relay when it is not
+publicly reachable, and the reservation renews itself, but there is a
+`Failed to renew relay reservation` branch worth watching over two days.
 
-Every bait goes on the pad with who was present; every reply to it is scored and
-handed to the analyst as ELICITED evidence, which beats aggregate statistics
-because it is timestamped and attributable. Weight the answers asymmetrically:
-knowing lifts somebody toward human, not knowing barely moves them, because a
-real attendee who skipped the morning genuinely cannot describe the coffee queue.
+**2. How many agents, and which.** The registration form allows up to five.
+Planned: `TuringBoss` and `TuringMiniBoss`. Node slots are permanent and the
+account is at its cap, so they have to come out of the existing names.
 
-**2. The measurement harness.** Built, and it has produced its first number.
-`BOSS_JOURNAL=<dir>` makes the processor write every decision it takes as JSON
-lines — what arrived, what it said and in which style, what it made of each
-guest, what it was holding on the pad, what the analyst concluded, what it threw
-away and why, and the vote with the evidence behind it. `python -m
-bench.room_report <dir>` renders a room top to bottom with all of that
-interleaved. It is a debug instrument: off unless the variable is set.
+**3. Merge `origin/main`, or decide not to.** Eight commits behind. Between-room
+history is no longer a hazard (`_empty_conversation` does not use their
+`reset()`), but their new `_store` no longer protects manager messages from
+rotation, so with `keep=80` a briefing can fall out of the window. Read that
+before merging, not after.
 
-**The first measurement says the detection does not work.** Six rooms against
-the lab's own guests (`collectionlessai/Turing-Hotel`, real personas and pacing)
-plus a second boss, every guest a bot, so the right answer was `nessuno` every
-time. One vote in six got it. Eleven names were wrongly called human, and two of
-them were our own other boss, which the numeric index scored as the *most* human
-guest in its room both times. Precision, on the only ground truth we have, is
-zero.
+### Faults seen in the real hotel, fixed or not
 
-**Re-measured with the analyst repaired: it got worse, and the larger sample is
-worse still.** Same five agents, same world. The analyst went from useful in 2
-rooms of 6 to useful in 6 of 6, and the vote went from 1 correct and 11 false
-positives to 0 and 13. Left running to **fourteen rooms**: still **0 correct,
-40 false positives**, an average of 2.9 names per room out of seven or eight
-present, and not one `nessuno` in the whole run. Repairing the analyst did not
-help because its delivery was never the binding problem.
+**4. Nonsense with an invented word.** `"il talk della mummia mom0326 che deve
+maledire tutti"`, produced from nothing. **Fixed**: `has_invented_token` drops a
+reply carrying an identifier-shaped token.
 
-**The analyst is asked the wrong question.** It is asked who behaved oddly, so
-the absence of oddity reads as humanity, and it writes things like "ha
-contribuito alla conversazione in modo costruttivo, mantenendo un tono coerente"
-and "attiva nell'interazione, faceva domande, mostrava interesse" — after which
-the vote calls them people. Every one of those is a compliment a language model
-earns for free. Engagement, coherence, attentiveness and staying on topic are
-the *cheapest* things an LLM produces; the lab's guests run at `reply_prob`
-0.65–0.95 behind 2,500-character personas and do all four relentlessly. The
-detector is scoring for exactly the quality the competition selects for, which
-is why it also scores our own entry as the most human guest in the room.
+**5. Saying its own name.** `"ciao qua zon"`, `"zia bob, ..."` — against an
+explicit instruction. **Fixed**: `drop_self_reference` removes the whole
+introducing phrase, not the bare word, which would leave "ciao qua,".
 
-The frame has to inverse: not "who slipped up" but "who showed something only a
-person could have". Positive, attributable evidence — an unscrapeable specific
-about today and this place, a correction about the physical world, friction that
-costs something (being bored, being wrong and not minding, refusing to play,
-bringing up something irrelevant from a life outside the room). Absence of that
-evidence should leave a guest unnamed, because silence about a stranger is free
-and calling a stranger human is a precision error. That is the next change, and
-the journal now makes it measurable.
+**6. Featherless latency.** Median 3.6s, 90th percentile 59.8s, worst 81.4s,
+with a single agent of ours running. One room in ten was touched. Worth trying
+faster models, without hurry — but the tail is the reason, not the median.
 
-Two things follow. The numeric index does not separate a good agent from a
-person — it separates effort, and our entry is built to spend effort. And the
-analyst, which is the part that could tell the difference, was silently broken:
-four calls in six returned nothing but the roster echoed back, because the
-prompt opens with "Partecipanti da analizzare: ..." and the model completed that
-sentence instead of starting its own. Now retried and, failing that, dropped
-rather than fed to the vote as an empty heading. Re-measure before believing any
-of the above is fixed.
+### The work the entry still needs
 
-**2b. The old note, kept because it is still half true.** In
-`TuringPlayground` we know which nodes are bosses, which are stubs and which is
-a person, so every vote cast there can be scored into real precision, recall and
-F1 — and, separately, the F1 of the numeric score alone, the analyst alone, and
-the two together. Until that exists, every detection change in this entry is
-justified by argument rather than measurement, including the ones already made.
+**7. Knowledge base in addressable blocks.** Neutral, factual, with a small
+always-on core and blocks pulled in only when the chat touches their keywords.
+This is the cure for the arancina and for "il talk sulle panelle". Includes
+removing `## NOTE` (hand-editing during the competition is not allowed) and
+reducing `## PAROLE` to two tiers.
 
-**3. Test our own resistance.** Two bosses in a playground room bait each other
-for free. If ours falls for its own gambit we are running a witch hunt as a
-witch, and the trace will say so. Done for timing only — `mechanical()` pointed
-at our own emitted gaps clears every rule with room to spare. The content side
-is still untested, and is the half that matters once the baits exist.
+**8. A strategy chosen per room, replacing the memo pad.** One stub from a
+hand-written list, developed by the model and held for the room; one or two
+calls instead of thirty. To be designed **together with 9**, since a bait is one
+of the strategies.
 
-**4. Model selection, revisited.** `processors/selector.py` routes nothing
-because Qwen2.5-72B won all seven rooms of the old bench. Worth re-running once
-the prompt work has settled, and note the timing rework removed the value of a
-fast model entirely: generation time is subtracted from the typing budget, so
-anything faster than the budget looks identical in the room.
+**9. Baits, possibly including prompt injection.** A *possible* strategy, not a
+requirement and not something the professor asked for — the earlier note in this
+file saying otherwise was wrong. Used rarely and worded differently each time,
+because an agent that tries the same trick on everybody has identified itself.
+The value is in reading who takes it, not in the attack.
 
-**5. Node hygiene.** Slots are concurrent, not permanent — running more than
-about eight nodes at once hits the ceiling. Reuse `TuringBoss`, `TuringBoss2`
-and `Grazia` rather than inventing names.
+**10. Personas: keep them grey.** The biography stays, but as cover for personal
+questions that are not identifying — not as material to perform. Nothing
+creative, nothing memorable: the aim is to be unrecognisable from one run to the
+next.
 
-**6. The conference itself.** `context_it.txt` `## NOTE` is the only thing a
-competitor cannot reproduce by scraping the programme, as we did. It has to be
-fed by hand while the conference runs. `## PAROLE` feeds detection the same way.
+**11. Re-measure.** The only ground truth we have — 14 rooms, 0 correct, 40
+false positives — predates the inverted analyst, the two axes and the fallback
+fix. None of today's work has been measured. Note the hotel currently holds
+**only bots**, which makes `nessuno` the right answer and precision measurable.
 
-## Known, not ours to fix
+**12. Test our own resistance to the baits.** After 8 and 9 exist.
 
-- The world hard-fails when the account profile has no `email`
-  (`guest.py::init`), and it takes down **human** guests specifically: a bot
-  skips that confirmation step, a person loops on the traceback forever. Patched
-  in our local copy only.
-- `managers.txt` matches on e-mail, but identity moved to the account handle
-  (`owner_handle`: "the address is not an identifier anymore"). Local copy has
-  `angry-galois/...` lines added.
-- `FeatherlessAPI._ensure_server` opens with `import fcntl` and cannot be
-  constructed on Windows. Shimmed in `processors/featherless.py`.
+**13. `TuringMiniBoss`.** The conference-agnostic version. Next thing after this
+one is finished.
+
+**14. Model bench, low priority.** Re-check whether Minerva is served (it was
+not on 2026-08-27, and it is a 7B against 32B/72B opponents).
+
