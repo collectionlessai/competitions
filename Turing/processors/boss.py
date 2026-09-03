@@ -429,6 +429,30 @@ class Boss(torch.nn.Module):
 
     # -- a new room -------------------------------------------------------
 
+    def _empty_conversation(self) -> None:
+        """Leave nothing of the last room behind, whichever kit we are sitting on.
+
+        `Conversation.reset()` used to clear the history outright. Upstream
+        changed the contract (`changed Conversation class contract`, 2026-09-02):
+        the first stored message became a pinned anchor that `reset()` keeps on
+        purpose, and the automatic new-room detection was replaced by a list of
+        phrases — "nuova conversazione", "clear context" — that a hotel manager
+        never says. Under that version, calling `reset()` between rooms would
+        carry the *previous* room's opening line into the next one, under a new
+        name, which is the one piece of history that must not survive.
+
+        Neither policy is wrong: the file says so itself, that the retention
+        policy is the starter kit's choice and not the world's contract. But it
+        is the kit's choice, and ours is a different one, so this stops
+        borrowing theirs. Clearing the list directly does the same thing on both
+        versions and will keep doing it on the next one.
+        """
+        self.conv.history.clear()
+        self.conv.last_input = ""
+        self.conv.last_output = ""
+        if hasattr(self.conv, "speakers"):      # gone upstream, present here
+            self.conv.speakers = []
+
     def _new_room(self) -> None:
         """A fresh person, a fresh conversation, a fresh attention span.
 
@@ -443,7 +467,7 @@ class Boss(torch.nn.Module):
         # "this agent's grafia" to learn across rooms
         (self.typing_cps, self.typo_chance, self.correct_chance,
          self.early_chance, self.device_pref) = read_style(self.persona)
-        self.conv.reset()
+        self._empty_conversation()
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
