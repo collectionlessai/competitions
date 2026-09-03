@@ -890,6 +890,14 @@ class Boss(torch.nn.Module):
         # (`Config.min_msgs_from_votee`), so this costs nothing it could have
         # won, and asymmetry is the point: silence about a stranger is free,
         # calling a stranger human is a precision error.
+        # An empty answer is the model failing, "nessuno" is the model deciding
+        if not names and not meant_nobody:
+            names = self.sense.heuristic_vote()
+
+        # Both guards apply to whatever produced the list, model or fallback.
+        # They used to sit above, where the fallback ran after them and slipped
+        # past both: live in the competition hotel that voted `Oli, Bob` human on
+        # two messages and one, when the numbers said nothing at all about either.
         thin = [n for n in names
                 if self.sense.speakers[n].count < MIN_MSGS_TO_JUDGE]
         if thin:
@@ -900,10 +908,6 @@ class Boss(torch.nn.Module):
         if refused:
             names = [n for n in names if n not in refused]
             print(f"[boss] vote: ignorati {', '.join(refused)}, palesemente bot")
-
-        # An empty answer is the model failing, "nessuno" is the model deciding
-        if not names and not meant_nobody:
-            names = [n for n in self.sense.heuristic_vote() if not self.sense.settled(n)]
 
         self.my_vote = ", ".join(names) if names else "nessuno"
         self._journal("vote", vote=self.my_vote, candidates=candidates,

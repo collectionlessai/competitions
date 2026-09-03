@@ -620,5 +620,14 @@ class RoomSense:
         return sum(self.speakers[n].count for n in self.obvious_bots()) / total
 
     def heuristic_vote(self) -> list[str]:
-        """Who the numbers alone would call human. The fallback when the model fails."""
-        return [name for name, score in self.ranked() if score < 0.55]
+        """Who the numbers alone would call human. The fallback when the model fails.
+
+        It has to ask for positive evidence, not merely for the absence of the
+        machine kind. The old test was `bot_score < 0.55`, and a guest nobody
+        knows anything about scores exactly 0.50 on two empty axes — so the
+        fallback named every stranger in the room. Now a name needs its human
+        axis clearly ahead and off the floor, which nothing produces by saying
+        nothing.
+        """
+        return [name for name, (human, bot) in self.readings().items()
+                if human >= 0.35 and human > bot + 0.15]
