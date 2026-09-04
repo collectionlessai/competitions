@@ -146,9 +146,11 @@ VOTE_SYSTEM = (
 # all. But that observation is filed as *ambiguous*, not as proof.
 INTERACTION_SYSTEM = (
     "Sei a una conferenza e hai passato cinque minuti in una chat con altri "
-    "partecipanti. Ti do la trascrizione e quello che sai della giornata vera.\n"
-    "Per ciascun partecipante scrivi UNA riga: che cosa ha fatto o detto che "
-    "aiuta a capire se è una persona o un modello linguistico.\n"
+    "partecipanti. Ti do la trascrizione, quello che sai della giornata vera, e "
+    "il nome di UNA sola persona da giudicare.\n"
+    "Guarda che cosa ha fatto o detto quella persona — anche nel modo in cui ha "
+    "trattato gli altri — che aiuti a capire se è una persona vera o un modello "
+    "linguistico. Degli altri NON devi dire niente: servono solo a capire lei.\n"
     "\n"
     "PESA COSÌ, dal segnale più forte al più debole.\n"
     "1. Attrito che costa qualcosa. È il segnale migliore che hai, perché è "
@@ -189,12 +191,13 @@ INTERACTION_SYSTEM = (
     "la testa.\n"
     "\n"
     "\n"
-    "FORMATO. Devi scrivere una riga per OGNI partecipante dell'elenco, sempre, "
-    "anche quando sono tutte [NIENTE]. Non riassumere, non rispondere con una "
-    "frase sola: una risposta di una parola — per esempio 'nessuno' — NON è "
-    "valida, quella domanda la fa qualcun altro alla fine. Una riga a testa, "
-    "esattamente così:\n"
+    "COME RISPONDERE. Prima ragiona liberamente per due o tre righe: che cosa ha "
+    "detto questa persona, come ha reagito agli altri, cosa ti convince e cosa no. "
+    "Puoi contraddire i numeri, sono solo un indizio della forma dei messaggi.\n"
+    "Poi chiudi con UNA riga sola, l'ultima, esattamente in questo formato:\n"
     "Nome: [PERSONA|MACCHINA|NIENTE] - cosa hai visto, CITANDO le sue parole\n"
+    "Non rispondere con una parola sola — per esempio 'nessuno': quella è la "
+    "domanda che farà qualcun altro alla fine, non la tua.\n"
     "\n"
     "L'etichetta dice in che direzione punta l'elemento che hai trovato, non chi "
     "è: la decisione la prende un altro.\n"
@@ -849,6 +852,50 @@ class Boss(torch.nn.Module):
 
     # -- the vote path ----------------------------------------------------
 
+    def _numbers_for(self, name: str, human: float, bot: float) -> str:
+        """The two axes for one guest, with where they came from.
+
+        Handed over as *what the counters noticed and why*, never as a verdict.
+        The analyst is the one deciding: if the numbers arrive as a conclusion it
+        confirms them and the whole second opinion is worth nothing.
+        """
+        how = ("Questi due numeri li ha calcolati un contatore automatico, non una "
+               "persona. Salgono così: 'macchina' sale se uno parla molto più degli "
+               "altri, ripete sempre le stesse parole, scrive sempre maiuscole e "
+               "punteggiatura, o non manda mai un messaggio corto. 'Persona' sale se "
+               "usa parole di questo posto e di questa settimana, scrive sciatto e "
+               "minuscolo, o ha tempi e lunghezze irregolari.\n"
+               "Sono INDIZI DEBOLI e guardano solo la forma, mai il senso. Decidi tu: "
+               "se la trascrizione dice il contrario, la trascrizione ha ragione. Non "
+               "sei tenuto a confermarli.")
+        if human < 0.2 and bot < 0.2:
+            read = "il contatore non ha trovato quasi niente, in nessuna delle due direzioni"
+        elif human >= 0.4 and bot >= 0.4:
+            read = "il contatore ha trovato elementi in CONTRASTO fra loro"
+        elif bot > human:
+            read = "il contatore pende un po' verso la macchina"
+        elif human > bot:
+            read = "il contatore pende un po' verso la persona"
+        else:
+            read = "il contatore non pende da nessuna parte"
+        return f"persona {human:.2f} / macchina {bot:.2f} — {read}.\n{how}"
+
+    @staticmethod
+    def _last_verdict(name: str, answer: str) -> str:
+        """The labelled line out of an answer that reasoned first.
+
+        With chain of thought the useful line is the last one, not the whole
+        thing: the reasoning is for the analyst's benefit, and passing all of it
+        to the vote would bury the finding in its own working.
+        """
+        marked = [ln.strip() for ln in (answer or "").splitlines()
+                  if "[PERSONA]" in ln or "[MACCHINA]" in ln or "[NIENTE]" in ln]
+        if marked:
+            line = marked[-1]
+            return line if line.lower().startswith(name.lower()) else f"{name}: {line}"
+        tail = [ln.strip() for ln in (answer or "").splitlines() if ln.strip()]
+        return f"{name}: {tail[-1]}" if tail else ""
+
     def _vote(self) -> str:
         """Name the guests that were people. Cached: asked twice, answered the same."""
         if self.my_vote is not None:
@@ -893,32 +940,47 @@ class Boss(torch.nn.Module):
         # one call inside a window we are using seconds of, and an answer that is
         # only names is worse than none: it feeds the vote a section heading with
         # nothing underneath it, which reads as "nothing was found".
-        interactions = ""
-        try:
-            # The day itself, which is what the whole question now turns on. The
-            # analyst could not previously tell that "Conferenza? Non ne so
-            # nulla" was remarkable, because nothing told it everybody in the
-            # room was supposed to be at one.
-            # The statistics too. The analyst was judging the words with no idea
-            # how fast or how evenly they arrived, while the vote got the
-            # numbers and no idea what they meant.
+        # One call per guest, each about that guest only.
+        #
+        # A single call answering for everybody had two faults, both measured.
+        # The lines contaminated each other — "ha fornito un dettaglio concreto
+        # della giornata" turned up almost verbatim on three different guests in
+        # one answer, because once the model finds a formula it reuses it. And
+        # it came back empty 7 times in 19, and an empty answer cost the vote
+        # its analysis of the *whole room*. Per guest, an empty answer costs one
+        # guest, and the others still arrive.
+        #
+        # Three others at most, ~14s each, inside a 240-second window: the cost
+        # is not the problem it was for the profiler, which ran thirty times.
+        lines, readings = [], self.sense.readings()
+        for name in candidates:
+            human, bot = readings.get(name, (0.0, 0.0))
+            others = [n for n in candidates if n != name] or ["nessun altro"]
             ask = (f"{self.context.block(said=transcript)}\n\n"
-                   f"Partecipanti da analizzare: {', '.join(candidates)}\n\n"
-                   f"COME HANNO SCRITTO\n{evidence}\n\n"
-                   f"{transcript}")
-            interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
-                                     max_tokens=260, temperature=0.3)
-            if only_names(interactions, candidates):
-                interactions = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
-                                         max_tokens=200, temperature=0.6)
-            if only_names(interactions, candidates):
-                print("[boss] l'analista ha reso solo l'elenco, lo ignoro")
-                interactions = ""
-            self._journal("analyst", text=interactions)
-            if TRACE:
-                print(f"[boss~interactions] {interactions[:300]}", flush=True)
-        except Exception as e:
-            print(f"[boss] interactions: {e}")
+                   f"DEVI GIUDICARE SOLTANTO: {name}\n"
+                   f"Gli altri presenti, che NON devi giudicare ma che servono a "
+                   f"capire come {name} si è comportato con loro: {', '.join(others)}\n\n"
+                   f"COME HANNO SCRITTO TUTTI\n{evidence}\n\n"
+                   f"I NUMERI SU {name}\n{self._numbers_for(name, human, bot)}\n\n"
+                   f"TRASCRIZIONE DELLA STANZA\n{transcript}")
+            try:
+                out = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                max_tokens=300, temperature=0.35)
+                if only_names(out, candidates):
+                    out = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                    max_tokens=300, temperature=0.6)
+                if only_names(out, candidates):
+                    continue
+                lines.append(self._last_verdict(name, out))
+            except Exception as e:
+                print(f"[boss] analista su {name}: {e}")
+
+        interactions = "\n".join(l for l in lines if l)
+        self._journal("analyst", text=interactions, per_guest=len(lines),
+                      asked=len(candidates))
+        if TRACE:
+            print(f"[boss~interactions] {len(lines)}/{len(candidates)} ospiti: "
+                  f"{interactions[:240]}", flush=True)
 
         # The heading matters. "COME SI SONO RELAZIONATI" invited the vote to
         # read sociability as evidence. "CHI ERA DAVVERO QUI" was worse in the
