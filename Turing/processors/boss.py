@@ -979,8 +979,21 @@ class Boss(torch.nn.Module):
             print(f"[boss] vote: ignorati {', '.join(refused)}, palesemente bot")
 
         self.my_vote = ", ".join(names) if names else "nessuno"
+        # Both axes, separately. The collapsed `bot_score` cannot tell (0,0) —
+        # nothing is known about this guest — from (1,1), where the evidence
+        # contradicts itself: both land on 0.50, and those are opposite
+        # situations. Twenty-one per cent of judgements sit on that tie, which
+        # is far too many to keep throwing away.
+        readings = {n: (round(h, 2), round(b, 2))
+                    for n, (h, b) in self.sense.readings().items()}
+        ties = {n: ("ignoto" if h < 0.2 and b < 0.2 else
+                    "contrasto" if h >= 0.4 and b >= 0.4 else "")
+                for n, (h, b) in readings.items()}
+
         self._journal("vote", vote=self.my_vote, candidates=candidates,
                       scores={n: round(v, 2) for n, v in self.sense.ranked()},
+                      readings=readings,
+                      ties={n: k for n, k in ties.items() if k},
                       settled=self.sense.obvious_bots(),
                       counts={n: self.sense.speakers[n].count for n in candidates},
                       evidence=evidence, raw=answer if "answer" in dir() else "")
