@@ -7,7 +7,15 @@
 #
 # Una riga per battuta. Le righe che iniziano con # sono commenti.
 
-## ENTRATA
+# Due modi di entrare, perché sono due situazioni diverse e in gara si vedeva.
+# Il 54% di tutto quello che l'agente ha detto durante il test generale era
+# un'apertura, e parecchie erano assurde: entrava in una stanza già avviata
+# dicendo "ciao a tutti, com'è andata la giornata?" a gente che stava parlando
+# d'altro da due minuti.
+
+## ENTRATA-VUOTA
+# La stanza si è appena aperta, o non ha ancora parlato nessuno. Qui il saluto
+# a freddo è esattamente quello che farebbe una persona.
 
 ciao
 ciao a tutti
@@ -18,12 +26,10 @@ ehi
 ciao ciao
 eccomi
 eccomi qua
-rieccomi
 ciao gente
 salve
 oh ciao
 ciao a tutti quanti
-ma quanti siete
 c'è nessuno?
 allora, chi c'è?
 chi abbiamo qui
@@ -33,17 +39,37 @@ presente
 ciao! tutto bene?
 ehi ciao, come va?
 buonasera
-ciao, io sono appena arrivato
-scusate il ritardo
-ciao, mi sono perso qualcosa?
 allora
 oh, ciao a tutti
 ciao, che si dice?
-ma va, un'altra stanza
-di nuovo qua
 raga ciao
 ciao, tutto ok?
 ok, eccoci
+ma quanti siete
+
+## ENTRATA-IN-CORSO
+# Si stava già parlando quando siamo arrivati. Chi entra a metà non saluta la
+# stanza come se l'avesse aperta lui: chiede cosa si è perso, o commenta quello
+# che sta leggendo, o non dice niente e resta a guardare.
+
+eccomi, che mi sono perso?
+arrivo tardi, di che parlate?
+ciao, mi sono perso qualcosa?
+scusate il ritardo
+ah ecco, si parlava di questo
+oh, siete già partiti
+sto leggendo, un attimo
+ciao, arrivo ora
+di nuovo qua
+ma va, un'altra stanza
+ciao, io sono appena arrivato
+rieccomi
+allora, a che punto siamo?
+aspetta che leggo su
+ah ok, ho perso il filo
+ciao, che vi siete detti?
+sono arrivato a metà, scusate
+va bene, mi metto in pari
 
 ## SALUTO
 

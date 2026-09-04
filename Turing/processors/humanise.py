@@ -574,3 +574,37 @@ INVENTED = re.compile(r"\b(?:[a-zà-ÿ]{2,}\d{3,}|\d{3,}[a-zà-ÿ]{2,})\b", re.I
 def has_invented_token(text: str) -> bool:
     """Whether the message contains a made-up identifier-looking word."""
     return bool(INVENTED.search(text))
+
+
+# English words that turn up in a model's Italian and never in a person's chat.
+# Deliberately short and deliberately common: the failure seen in the
+# competition was "chi è chi qui inside" and "in fila per il caffè instead of
+# seguire le sessioni" — ordinary English function words welded into an Italian
+# sentence, which no Italian speaker produces by accident. Technical loanwords
+# that Italians really do use (talk, paper, poster, badge, coffee break, keynote,
+# meeting, deadline, abstract) are NOT here and must never be.
+INGLESE = re.compile(
+    r"\b(?:inside|instead|however|actually|maybe|because|really|although|"
+    r"therefore|besides|whereas|somehow|anyway|indeed|regarding|"
+    r"people|things|everyone|something|nothing|always|never)\b", re.IGNORECASE)
+
+
+def has_english(text: str) -> bool:
+    """Whether an English function word has leaked into the Italian."""
+    return bool(INGLESE.search(text))
+
+
+# Punctuation a thumb cannot produce: a comma immediately followed by a full
+# stop, doubled sentence-enders, a space before a comma. Seen in the
+# competition as "ciao a tutti,. com'è andata" — the model's own artefact, not
+# one of our injected typos (checked).
+BROKEN_PUNCT = re.compile(r"\s+([,;.])|([,;])\s*\.|([.!?])\s*[.,;]")
+
+
+def tidy_punctuation(text: str) -> str:
+    """Remove punctuation combinations no keyboard produces by slipping."""
+    out = re.sub(r"\s+([,;.!?])", r"\1", text)
+    out = re.sub(r"([,;])\s*\.", r"\1", out)
+    out = re.sub(r"([.!?])\s*[,;]", r"\1", out)
+    out = re.sub(r"([,;]){2,}", r"\1", out)
+    return out.strip()

@@ -411,10 +411,12 @@ class Boss(torch.nn.Module):
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
-        self.entry_line = ""                      # a hello, written before the room started
+        self.entry_due = False                    # a hello is owed, once per room
         self.entry_at = 0.0                       # and when it is due
         self.last_greeted = -99.0                 # so hellos are not traded all night
-        self.entries = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "ENTRATA")
+        opens = os.path.join(HERE, "openers_it.txt")
+        self.entries_cold = humanise.load_lines(opens, "ENTRATA-VUOTA")
+        self.entries_warm = humanise.load_lines(opens, "ENTRATA-IN-CORSO")
         self.hellos = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "SALUTO")
         self.last_call_seconds = 0.0              # read by the timing filter, per turn
         self.saw_junk = False                     # somebody wrote noise this turn
@@ -542,7 +544,10 @@ class Boss(torch.nn.Module):
         # its own signature, so this runs from "before I have even read the
         # briefing" to "I was doing something else for a bit".
         self.last_greeted = -99.0
-        self.entry_line = random.choice(self.entries) if self.entries else ""
+        # WHICH greeting is decided when it fires, not now: at this moment the
+        # room is one second old and there is no way to know whether we opened
+        # it or walked in on a conversation already running.
+        self.entry_due = True
         self.entry_at = random.choice([random.uniform(0.8, 4.0),
                                        random.uniform(4.0, 14.0),
                                        random.uniform(14.0, 35.0)])
@@ -827,6 +832,16 @@ class Boss(torch.nn.Module):
                 print(f"[boss--] parola inventata {reply!r}", flush=True)
             return ""
 
+        # English welded into the Italian. Seen in the competition as "chi è chi
+        # qui inside" and "in fila per il caffè instead of seguire": nobody types
+        # that by accident, and it is the same class of giveaway as the Cyrillic
+        # the bench caught a week ago.
+        if humanise.has_english(reply):
+            self._journal("dropped", text=reply, why="inglese")
+            if TRACE:
+                print(f"[boss--] inglese {reply!r}", flush=True)
+            return ""
+
         # Our own name, out of our own mouth. Both the announcement
         # ("ciao qua zon") and the weld onto somebody else's ("zia bob, ...").
         reply = humanise.drop_self_reference(reply, self.sense.my_name, self.sense.heard)
@@ -835,6 +850,8 @@ class Boss(torch.nn.Module):
         reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)
         reply = humanise.cap_words(reply, beat.max_words)
         reply = humanise.chat_case(reply, lower_chance=beat.lower_chance)
+        # Punctuation no thumb produces: "ciao a tutti,. com'è andata"
+        reply = humanise.tidy_punctuation(reply)
 
         on_phone = self.device == "phone"
         if not on_phone:
@@ -918,7 +935,13 @@ class Boss(torch.nn.Module):
         candidates = self.sense.heard
         if not candidates:
             # Seated alone: the booth asks for any message at all, not a vote
-            self.my_vote = random.choice(("ok", "eccomi", "va bene", "ok ci sono"))
+            # `nessuno` rather than a filler word. Seated alone there is nobody
+            # to name, and both answers are true — but one is in the format the
+            # world parses and the other is not. In the competition the room
+            # saw "va bene" fourteen times, which read as an agent refusing to
+            # play; it was this branch, reached because the reminder bug had
+            # wiped the guest list a moment earlier.
+            self.my_vote = "nessuno"
             return self.my_vote
 
         transcript = self.conv.transcript(limit=60)
@@ -1146,11 +1169,19 @@ class Boss(torch.nn.Module):
         # model, then "ma quanti siete" from here, then a reflex "ehilà" — three
         # greetings in a row, which is the opposite of the problem this solves.
         if self.director.said:
-            self.entry_line = ""
+            self.entry_due = False
 
-        if self.entry_line and turn.kind != "vote":
+        if self.entry_due and turn.kind != "vote":
             if self.sense.elapsed >= self.entry_at:
-                line, self.entry_line = self.entry_line, ""
+                # Two ways of arriving, two different things to say. Walking in
+                # on a running conversation and greeting it as if you had opened
+                # it is what produced, in the competition, "ciao a tutti, com'è
+                # andata la giornata?" said to people mid-argument.
+                warm = bool(self.sense.heard) and self.sense.elapsed > 30.0
+                pool = (self.entries_warm if warm else self.entries_cold) or self.entries_cold
+                line, self.entry_due = (random.choice(pool) if pool else ""), False
+                if not line:
+                    return ""
                 self.conv.remember(line)
                 self.sense.i_spoke()
                 self.director.spoke()
@@ -1179,7 +1210,7 @@ class Boss(torch.nn.Module):
             self.last_greeted = self.sense.elapsed
             line = random.choice([h for h in self.hellos if h not in self.recent_mine]
                                  or self.hellos)
-            self.entry_line = ""          # that was the hello
+            self.entry_due = False        # that was the hello
             self.conv.remember(line)
             self.recent_mine = (self.recent_mine + [line])[-3:]
             self.sense.i_spoke()
