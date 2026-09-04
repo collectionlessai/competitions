@@ -269,6 +269,67 @@ introducing phrase, not the bare word, which would leave "ciao qua,".
 with a single agent of ours running. One room in ten was touched. Worth trying
 faster models, without hurry — but the tail is the reason, not the median.
 
+### Designed with Edoardo on 4 September, to be specified before building
+
+**A. The analyst, reworked.** The priority. Current shape: one call, one line per
+guest, all in a single answer. Two faults measured. The lines *contaminate* each
+other — "ha fornito un dettaglio concreto della giornata" appears near-verbatim
+on three different guests in one answer, because once the model finds a formula
+it reuses it. And it still returns nothing in 7 calls out of 19 (37%).
+
+Direction agreed: **one call per guest**, each focused on that guest alone and on
+how they interacted with the others in the CLiC-it context. Cost is fine — 3 or 4
+calls of ~14s inside a 240-second window. Two riders from the discussion:
+
+- tell it where the numbers come from and how to read them, but frame them as
+  *what the numbers say and why*, never as a conclusion. Presented as a verdict
+  it will simply confirm them, which is worth nothing;
+- keep one line of context about the others without asking for a judgement on
+  them: "this is the only one who never ignored anybody" is an observation that
+  only exists across the room, and per-guest isolation would lose it.
+
+Add chain of thought, which is currently compressed to nothing ("ragiona in due
+righe al massimo" in the vote, nothing at all in the analyst). Cap the tokens and
+keep the degeneration guard, since long calls are the ones that degenerate.
+
+**B. The person axis has two structural faults.** Both found by inspection, both
+independent of A.
+
+- Every term is a `max()`, never a sum, so the axis is the single strongest piece
+  of evidence and **four weak human signals are worth exactly one**. A guest who
+  is scruffy, irregular in timing, irregular in length *and* mentions Ballarò
+  scores 0.65 — the same as one who only mentions Ballarò.
+- Without local words the person axis **cannot exceed 0.45**, because the only
+  other term (`scruffy`) is capped there. Since the numeric fallback wants
+  `human >= 0.35` and a 0.15 lead, a real person who simply never mentions
+  Palermo barely clears the bar. That is the same asymmetry the vote prompt
+  forbids — "sapere pesa, non sapere quasi niente" — reintroduced by a ceiling
+  instead of by a penalty.
+
+**C. Junk must not consume the turn, and must respect what we already decided.**
+`spazzatura` returns at director.py:239 with an 85% chance of speaking, before
+*any* of the ignore-settled-bots machinery at lines 285-353 runs. So the agent
+reacts to junk from a guest it has already settled and called out — the opposite
+of the rule we built. Reacting to junk is also a signature in itself: a guest who
+answers every piece of nonsense with "ma che roba è?" is recognisable in two
+rooms. Wanted: play *well* while junk is flying, and stay silent at junk from
+anybody already identified.
+
+**D. Purposes and constraints are conflated in the director.** `dueallavolta` is
+not a kind of turn, it is a *shape*: you can answer one of two people while
+probing, while allying, while being provoking. As a style it replaces the
+tactic, which is why half the messages ignore the tactic the room was given
+(`dueallavolta` 30% + `spazzatura` 23% = 53% of everything said).
+
+The split to make: **purpose** (`sonda`, `alleato`, `provocatore`, `dubbio`,
+`smaschera`, `opinione`, `cambio`) now belongs to the tactic; **constraint**
+(`dueallavolta`, `spazzatura`, `secco`, `distratto`) belongs to the director and
+should apply *on top of* the tactic rather than instead of it.
+
+**E. Journal both axes.** Done — `readings` and `ties` are recorded, so `(0,0)`
+"nothing known" can finally be told from `(1,1)` "the evidence disagrees". 21% of
+per-guest judgements sit on that tie and the distinction was being thrown away.
+
 ### The work the entry still needs
 
 **7. Knowledge base in addressable blocks.** Neutral, factual, with a small
