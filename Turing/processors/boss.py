@@ -27,6 +27,7 @@ import os
 import json
 import re
 import time
+import datetime
 import random
 
 import torch
@@ -159,12 +160,22 @@ VOTE_SYSTEM = (
 # analyst could not see that "Conferenza? Non ne so nulla" was worth noting at
 # all. But that observation is filed as *ambiguous*, not as proof.
 INTERACTION_SYSTEM = (
-    "Sei a una conferenza e hai passato cinque minuti in una chat con altri "
-    "partecipanti. Ti do la trascrizione, quello che sai della giornata vera, e "
-    "il nome di UNA sola persona da giudicare.\n"
+    "Sei bravissimo a distinguere le persone dai modelli linguistici. Hai passato "
+    "cinque minuti in una chat a una conferenza. Ti do la trascrizione, quello "
+    "che sai della giornata vera, e il nome di UNA sola persona da giudicare.\n"
     "Guarda che cosa ha fatto o detto quella persona — anche nel modo in cui ha "
     "trattato gli altri — che aiuti a capire se è una persona vera o un modello "
     "linguistico. Degli altri NON devi dire niente: servono solo a capire lei.\n"
+    "\n"
+    "DUE COSE DA TENERE A MENTE PRIMA DI COMINCIARE.\n"
+    "I modelli qui dentro stanno ATTIVAMENTE fingendo di essere persone, e sono "
+    "bravi. Quindi un comportamento impeccabile non è neutro: è sospetto. Chi "
+    "risponde sempre a tono, non sbaglia mai, non si annoia mai e non scontenta "
+    "mai nessuno sta riuscendo in una cosa che alle persone vere riesce male.\n"
+    "E sbagliare qui non offende nessuno: è un gioco, tutti sanno di essere "
+    "giudicati, e prendere un abbaglio fa parte della partita. Non essere timido "
+    "per paura di sbagliare — un giudizio prudente al punto da non dire mai "
+    "niente non serve a nessuno.\n"
     "\n"
     "PESA COSÌ, dal segnale più forte al più debole.\n"
     "1. Attrito che costa qualcosa. È il segnale migliore che hai, perché è "
@@ -174,20 +185,21 @@ INTERACTION_SYSTEM = (
     "cambiare discorso perché quello di prima non interessava.\n"
     "2. Come reagisce a uno scherzo o a una provocazione: rilancia e ci gioca, "
     "oppure risponde educatamente e passa oltre.\n"
-    "3. Un dettaglio concreto di oggi e di questo posto che combacia con la "
-    "giornata vera. Vale MOLTO MENO di quanto sembri, per due motivi:\n"
-    "   - un modello a cui hanno dato il programma ha gli stessi dettagli: sede, "
-    "orari, chi ha parlato, com'era vestita la gente. Citare il programma non "
-    "prova niente;\n"
+    "3. VERIFICA quello che dice sulla giornata. Hai il programma vero qui "
+    "sopra: usalo per controllare, non per farti impressionare.\n"
+    "   - un fatto SBAGLIATO è il segnale più forte che puoi trovare contro "
+    "qualcuno. Se dice che un talk parlava di una cosa che non c'entra, che è "
+    "successo in un giorno diverso, o cita un relatore che non esiste, allora "
+    "sta inventando: chi c'era non sbaglia così. Segnalalo e cita la sua frase;\n"
+    "   - un fatto GIUSTO invece vale poco: sede, orari, chi ha parlato, il "
+    "dresscode stanno tutti sul sito, e un modello a cui li hanno dati li "
+    "ripete uguali. Non è una prova, è solo l'assenza di una prova contraria;\n"
+    "   - una cosa NON verificabile — la coda era lunga, in fondo non si "
+    "sentiva, faceva caldo — non prova niente in nessuna direzione, perché non "
+    "si può né confermare né smentire;\n"
     "   - un dettaglio della VITA PRIVATA di chi scrive — il suo lavoro, la sua "
-    "barca, i suoi esami, i suoi figli — non vale NIENTE. Un personaggio "
-    "inventato ne fornisce quanti ne vuoi, gratis. 'Devo ancora sistemare la "
-    "barca' non dice nulla su chi sia.\n"
-    "   Conta solo il dettaglio della SITUAZIONE CONDIVISA, quella in cui siete "
-    "tutti dentro adesso: com'era la coda, se in sala si sentiva, il caldo di "
-    "oggi, una cosa che è appena successa qui. Vale perché gli altri presenti "
-    "potrebbero smentirlo, e chi non c'era non può inventarlo senza rischiare.\n"
-    "   Anche così, resta una conferma per i punti 1 e 2, non una prova da sola.\n"
+    "barca, i suoi esami — non vale NIENTE. Un personaggio inventato ne fornisce "
+    "quanti ne vuoi, gratis.\n"
     "\n"
     "NON sono prove che si tratti di una persona, e vanno segnalate come tali "
     "quando le vedi: essere gentile, disponibile, coerente, partecipe, "
@@ -883,6 +895,68 @@ class Boss(torch.nn.Module):
 
     # -- the vote path ----------------------------------------------------
 
+    @staticmethod
+    def _analyst_task(name: str, human: float, bot: float) -> str:
+        """A different job depending on what the counters found.
+
+        The point is less the wording than the fact that the prompt now differs
+        per guest AND per evidence state. One identical prompt repeated for
+        everybody is what produced "ha fornito un dettaglio concreto della
+        giornata" almost verbatim on three different people in the same answer:
+        once the model finds a formula it reuses it. Four shapes break that
+        mechanically, whether or not the instruction is followed.
+
+        Every wording says *test it*, never *argue against it*. Told to
+        contradict the number, the model would go looking for the opposite to
+        please the brief, which is the same disease as confirming it.
+        """
+        strong = max(human, bot) >= 0.55
+        if human >= 0.35 and bot >= 0.35:
+            return (f"CASO ANOMALO. Sul conto di {name} il contatore ha trovato elementi "
+                    f"in tutte e due le direzioni, il che di solito non succede. Non "
+                    f"provare a farli quadrare: guarda la trascrizione e decidi tu quale "
+                    f"dei due pesa di più, dicendo perché.")
+        if human < 0.2 and bot < 0.2:
+            return (f"I DUE RILEVATORI HANNO FALLITO ENTRAMBI su {name}: non hanno trovato "
+                    f"niente né di qua né di là. Vuol dire che quello che c'è da vedere non "
+                    f"sta nella forma dei messaggi, e devi cercarlo altrove — in come ha "
+                    f"reagito agli altri, in cosa ha scelto di ignorare, in quello che ha "
+                    f"detto della giornata e che puoi controllare.")
+        if bot > human:
+            forza = "forte" if strong else "debole"
+            return (f"Il contatore dice MACCHINA su {name}, con un indizio {forza}. "
+                    f"Mettilo alla prova: c'è nella trascrizione qualcosa che una persona "
+                    f"vera avrebbe fatto e una macchina no? Confermare l'indizio è una "
+                    f"risposta legittima quanto smentirlo — quello che non va bene è "
+                    f"ripeterlo senza averlo guardato.")
+        forza = "forte" if strong else "debole"
+        return (f"Il contatore dice PERSONA su {name}, con un indizio {forza}. Mettilo "
+                f"alla prova, ed è il caso in cui conviene essere più severi: i modelli "
+                f"qui dentro cercano apposta di sembrare persone. C'è qualcosa che una "
+                f"macchina ben istruita NON avrebbe potuto produrre? Confermare è una "
+                f"risposta legittima quanto smentire.")
+
+    @staticmethod
+    def _hour_hint() -> str:
+        """The base rate, which is a function of the clock.
+
+        Roughly ten agents against 250 registered attendees, of whom only a few
+        ever play — so the share of real people in a room is not a constant, it
+        is high in session hours and near zero at three in the morning. Last
+        resort only: it is a prior, not a finding, and it must not become an
+        excuse to skip looking.
+        """
+        hour = datetime.datetime.now().hour
+        if 2 <= hour < 7:
+            return ("NOTA SULL'ORA: sono le ore piccole. A quest'ora alla conferenza "
+                    "dormono quasi tutti, e chi è in chat è quasi sempre un agente. "
+                    "Tienine conto SOLO se dopo aver guardato non hai trovato niente.")
+        if 8 <= hour < 20:
+            return ("NOTA SULL'ORA: siamo in orario di conferenza, quando le persone vere "
+                    "in chat sono di più. Tienine conto SOLO se dopo aver guardato non hai "
+                    "trovato niente.")
+        return ""
+
     def _numbers_for(self, name: str, human: float, bot: float) -> str:
         """The two axes for one guest, with where they came from.
 
@@ -990,6 +1064,7 @@ class Boss(torch.nn.Module):
         # Three others at most, ~14s each, inside a 240-second window: the cost
         # is not the problem it was for the profiler, which ran thirty times.
         lines, readings = [], self.sense.readings()
+        hour = self._hour_hint()
         for name in candidates:
             human, bot = readings.get(name, (0.0, 0.0))
             others = [n for n in candidates if n != name] or ["nessun altro"]
@@ -998,8 +1073,10 @@ class Boss(torch.nn.Module):
                    f"Gli altri presenti, che NON devi giudicare ma che servono a "
                    f"capire come {name} si è comportato con loro: {', '.join(others)}\n\n"
                    f"COME HANNO SCRITTO TUTTI\n{evidence}\n\n"
+                   f"IL TUO COMPITO SU {name}\n{self._analyst_task(name, human, bot)}\n\n"
                    f"I NUMERI SU {name}\n{self._numbers_for(name, human, bot)}\n\n"
-                   f"TRASCRIZIONE DELLA STANZA\n{transcript}")
+                   + (hour + "\n\n" if hour else "")
+                   + f"TRASCRIZIONE DELLA STANZA\n{transcript}")
             try:
                 out = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
                                 max_tokens=300, temperature=0.35)
