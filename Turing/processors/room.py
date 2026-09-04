@@ -41,6 +41,16 @@ NAME_OK = re.compile(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]{1,20}$")
 # Cue families, not sentences. Each one is a thing the message has to do, in
 # whatever words it does it in, and no single one decides anything on its own.
 NAMING = re.compile(r"benvenut|ti\s+chiam|il\s+tuo\s+nome|ti\s+present", re.IGNORECASE)
+# Who else is in the room. A briefing says it; a reminder never does, because by
+# then you already know. This is the one cue that separates the two.
+ROSTER_CUE = re.compile(r"gli\s+altri\s+(?:ospiti|partecipanti)|"
+                        r"altri\s+ospiti\s+sono|per\s+ora\s+sei\s+sol|"
+                        r"sei\s+sol[oa]\b|in\s+questo\s+momento\s+sono", re.IGNORECASE)
+# The reminder's own vocabulary: staying put, leaving early, voting.
+REMINDER_CUE = re.compile(r"resterai\s+in\s+questa\s+stanza|"
+                          r"quando\s+vuoi\s+per\s+lasciare|"
+                          r"lasciare\s+subito\s+la\s+stanza|"
+                          r"dare\s+il\s+tuo\s*voto", re.IGNORECASE)
 DURATION = re.compile(r"\d{2,}\s*(?:second|minut)", re.IGNORECASE)
 ASKING = re.compile(r"elenc|vot(?:a|o|are|erai)|scegl|indic|dimmi|second[oa]\s+te|"
                     r"chi\s+(?:era|erano|pensi|credi)", re.IGNORECASE)
@@ -343,14 +353,23 @@ class RoomSense:
         self.markers = frozenset(markers)
         self.strong = frozenset(strong)
         self.state = ""             # last state name the policy filter saw
+        self.states_seen: dict = {}  # every distinct one, and how often
         self.reset()
 
     # -- shared with the policy filter ------------------------------------
 
     def note_state(self, state: str) -> None:
-        """Called from the timing filter, ten times a second, with the current state."""
+        """Called from the timing filter, ten times a second, with the current state.
+
+        Every distinct state is kept, not just the current one. When the reminder
+        bug wiped the rooms in the competition it took an hour to work out why,
+        and the one thing that would have settled it in a minute — which states
+        the world actually pushes, and whether they reach us at all — was the one
+        thing nothing recorded.
+        """
         if state and state != self.state:
             self.state = state
+            self.states_seen[state] = self.states_seen.get(state, 0) + 1
 
     @property
     def voting(self) -> bool:
@@ -414,9 +433,28 @@ class RoomSense:
         return speaker == self.manager_guess
 
     def _briefing_score(self, text: str) -> int:
-        # The briefing is the message that gives you a name. Without that it is
-        # some other long manager message, and the vote request is one of those:
-        # it is also long, also full of bold names, also quotes a countdown
+        """How much this looks like the message that opens a room.
+
+        The hard case is not the vote request, it is the periodic REMINDER, and
+        it cost us the competition's whole detection score on 4 September. The
+        reminder reads:
+
+            "Il tuo nome è **Ami** e resterai in questa stanza per 105 secondi,
+             ma puoi scrivere 'exit' quando vuoi ... e dare il tuo voto!"
+
+        It contains "il tuo nome" and a countdown, which is exactly the briefing
+        signature, and it scored 4 — the same as a real briefing. Every reminder
+        therefore started a new room: 47 rooms instead of a dozen, the speaker
+        table wiped seconds before each vote, `heard` empty so the vote answered
+        "va bene" instead of voting, and half of everything the agent said was an
+        opening line because it kept believing it had just walked in.
+
+        The discriminator is the ROSTER. A briefing always says who else is here
+        ("gli altri ospiti sono X, Y") or that you are alone; a reminder never
+        does, because you already know. And the reminder's own vocabulary —
+        staying, leaving, the vote — argues against a briefing rather than
+        being neutral about it.
+        """
         if not NAMING.search(text):
             return 0
 
@@ -431,7 +469,14 @@ class RoomSense:
             score += 2
         if DURATION.search(text):
             score += 1
-        return score
+
+        # The roster is what a briefing has and a reminder does not
+        if ROSTER_CUE.search(text):
+            score += 3
+        # ...and these are what a reminder has and a briefing does not
+        if REMINDER_CUE.search(text):
+            score -= 4
+        return max(0, score)
 
     def _vote_score(self, text: str) -> int:
         score = 0

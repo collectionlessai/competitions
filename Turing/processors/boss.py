@@ -1067,6 +1067,7 @@ class Boss(torch.nn.Module):
                 for n, (h, b) in readings.items()}
 
         self._journal("vote", vote=self.my_vote, candidates=candidates,
+                      states=dict(self.sense.states_seen),
                       scores={n: round(v, 2) for n, v in self.sense.ranked()},
                       readings=readings,
                       ties={n: k for n, k in ties.items() if k},
