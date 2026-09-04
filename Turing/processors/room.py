@@ -46,11 +46,12 @@ NAMING = re.compile(r"benvenut|ti\s+chiam|il\s+tuo\s+nome|ti\s+present", re.IGNO
 ROSTER_CUE = re.compile(r"gli\s+altri\s+(?:ospiti|partecipanti)|"
                         r"altri\s+ospiti\s+sono|per\s+ora\s+sei\s+sol|"
                         r"sei\s+sol[oa]\b|in\s+questo\s+momento\s+sono", re.IGNORECASE)
-# The reminder's own vocabulary: staying put, leaving early, voting.
+# The reminder's own vocabulary. Only phrases the BRIEFING never uses: both
+# messages offer the exit, so "lasciare subito la stanza" belonged here at first
+# and knocked every real briefing down with it — the offline check caught it.
 REMINDER_CUE = re.compile(r"resterai\s+in\s+questa\s+stanza|"
                           r"quando\s+vuoi\s+per\s+lasciare|"
-                          r"lasciare\s+subito\s+la\s+stanza|"
-                          r"dare\s+il\s+tuo\s*voto", re.IGNORECASE)
+                          r"dare\s+il\s+tuo\s*voto\b", re.IGNORECASE)
 DURATION = re.compile(r"\d{2,}\s*(?:second|minut)", re.IGNORECASE)
 ASKING = re.compile(r"elenc|vot(?:a|o|are|erai)|scegl|indic|dimmi|second[oa]\s+te|"
                     r"chi\s+(?:era|erano|pensi|credi)", re.IGNORECASE)
