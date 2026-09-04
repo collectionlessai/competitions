@@ -154,7 +154,27 @@ class Speaker:
         if f["count"] < 2:
             return 0.0, 0.0             # nothing to go on, and say so
 
-        human = bot = 0.0
+        # Evidence accumulates rather than competing. Every term used to be a
+        # `max()`, which had two consequences and both were faults: four weak
+        # human signals were worth exactly one — somebody scruffy, erratic in
+        # timing, erratic in length *and* mentioning Ballarò scored the same
+        # 0.65 as somebody who only mentioned Ballarò — and, worse, without
+        # local words the human axis could not pass 0.45, because that was the
+        # cap on the only other term. The second was the asymmetry `VOTE_SYSTEM`
+        # forbids in as many words ("sapere pesa, non sapere quasi niente"),
+        # sneaking back in as a ceiling instead of a penalty.
+        #
+        # Noisy-OR instead: `1 - Π(1 - t)`. Independent pieces of evidence add
+        # up with diminishing returns, nothing can exceed 1 without a clamp, and
+        # a single strong signal still dominates a pile of weak ones.
+        human_terms: list[float] = []
+        bot_terms: list[float] = []
+
+        def combine(terms: list) -> float:
+            out = 1.0
+            for t in terms:
+                out *= (1.0 - min(max(t, 0.0), 1.0))
+            return 1.0 - out
 
         # -- evidence that it is a machine --------------------------------
 
@@ -162,14 +182,14 @@ class Speaker:
         # 0.91 (the organisers' own agents_characters.csv) and somebody
         # half-reading a group chat on their phone does not.
         if share is not None and f["count"] >= 3:
-            bot = max(bot, 0.55 * min(1.0, max(0.0, (share - 0.35) / 0.35)))
+            bot_terms.append(0.55 * min(1.0, max(0.0, (share - 0.35) / 0.35)))
 
         # The same handful of words over and over
         if f["count"] >= 3:
             tokens = " ".join(self.msgs).lower().split()
             if len(tokens) >= 12:
                 variety = len(set(tokens)) / len(tokens)
-                bot = max(bot, 0.7 * max(0.0, 1.0 - variety / 0.40))
+                bot_terms.append(0.7 * max(0.0, 1.0 - variety / 0.40))
 
         # Prose that survived the chat window: capitals and full stops every
         # line, long lines, and never a two-word answer. Low weight on its own
@@ -178,7 +198,7 @@ class Speaker:
         tidy = 0.5 * f["capital"] + 0.5 * f["full_stop"]
         longish = min(1.0, max(0.0, (f["chars"] - 55.0) / 60.0))
         never_short = 1.0 if min(len(m) for m in self.msgs) > 25 else 0.0
-        bot = max(bot, 0.6 * (tidy * 0.4 + longish * 0.3 + never_short * 0.3))
+        bot_terms.append(0.6 * (tidy * 0.4 + longish * 0.3 + never_short * 0.3))
 
         # -- evidence that it is a person ---------------------------------
 
@@ -188,7 +208,7 @@ class Speaker:
         if markers and f["count"] >= 3:
             said = " ".join(self.msgs).lower()
             seen = {w for w in markers if _said(said, w)}
-            human = max(human, 0.65 * min(1.0, len(seen) / 2.0))
+            human_terms.append(0.65 * min(1.0, len(seen) / 2.0))
 
         # Writing like a thumb rather than a keyboard: at least one genuinely
         # short message, no capitals, no closing punctuation.
@@ -196,16 +216,18 @@ class Speaker:
         if min(len(m) for m in self.msgs) <= 12:
             scruffy += 0.4
         scruffy += 0.3 * (1.0 - f["capital"]) + 0.3 * (1.0 - f["full_stop"])
-        human = max(human, 0.45 * scruffy)
+        human_terms.append(0.45 * scruffy)
 
         # Erratic in time and in length. Weak on purpose — the seeded agents
         # jitter deliberately — but erraticness is only ever evidence one way.
         if f["gap"] is not None and f["gap_sd"] is not None and len(self.gaps) >= 3:
             spread = f["gap_sd"] / max(f["gap"], 0.5)
-            human = max(human, 0.35 * min(1.0, spread / 0.8))
+            human_terms.append(0.35 * min(1.0, spread / 0.8))
         if f["count"] >= 3:
             spread = f["chars_sd"] / max(f["chars"], 1.0)
-            human = max(human, 0.35 * min(1.0, spread / 0.7))
+            human_terms.append(0.35 * min(1.0, spread / 0.7))
+
+        human, bot = combine(human_terms), combine(bot_terms)
 
         # -- the one certainty ---------------------------------------------
 

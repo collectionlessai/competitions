@@ -66,24 +66,37 @@ STYLES = {
                  "e spiega in poche parole cosa l'ha tradito",
     "allea": "uno di loro ti sembra una persona vera: dagli ragione, fai squadra, "
              "punta insieme a lui su chi vi sembra finto",
-    "secco": "rispondi secchissimo, quattro o cinque parole al massimo",
     "domanda": "fai una domanda corta a uno di loro, senza cortesie",
     "cambio": "cambia discorso, tira su una cosa tua che non c'entra niente",
     "dubbio": "butta lì il dubbio che uno di loro non sia una persona vera, senza accusare apertamente",
     "accusa": "di' apertamente che secondo te {chi} è un bot, diretto e un po' provocatorio",
-    "dueallavolta": "ti hanno scritto in due insieme. rispondi a UNO solo, quello che ti ha "
-                    "punzecchiato di più, e l'altro ignoralo del tutto",
     "battuta": "rispondi con una battuta o una presa in giro breve",
-    "distratto": "sei distratto e stai facendo altro, rispondi a metà o di fretta",
     "opinione": "dì la tua su quello che hanno detto, in modo netto, anche controcorrente",
+    # `secco` is kept for the one place that still asks for it by name — a
+    # throwaway line on a manager announcement. It is not in the pool any more:
+    # curtness travels as a constraint, so it can shorten a probe instead of
+    # replacing it. `distratto` is gone entirely, being one of the room tactics.
+    "secco": "rispondi secchissimo, quattro o cinque parole al massimo",
 }
 
-# Somebody wrote noise. The failure mode is joining in: a room where one guest
-# degenerates and the rest answer in kind reads as four broken models, which is
-# what it is. A person reacts to nonsense as nonsense and carries on.
-JUNK_NUDGE = ("qualcuno ha scritto una cosa senza senso. reagisci come farebbe una persona: "
-              "stupito, preso in giro, infastidito o divertito, in una riga. non provare a "
-              "interpretarla, non rispondere nel merito e non imitarla")
+# Not purposes: shapes. These say how the turn must come out, and they are meant
+# to sit on top of whatever the room's tactic is trying to achieve — you can
+# answer one of two people while probing, or brush past nonsense while allying.
+# They used to be entries in STYLES, where each one replaced the purpose
+# entirely; between them they accounted for 53% of everything the agent said.
+CONSTRAINTS = {
+    "dueallavolta": "ti hanno scritto in due insieme: rispondi a UNO solo, quello che ti ha "
+                    "punzecchiato di più, e l'altro ignoralo del tutto",
+    # The failure mode with noise is joining in: a room where one guest
+    # degenerates and the rest answer in kind reads as four broken models, which
+    # is what it is. A person reacts to nonsense as nonsense and carries on.
+    "spazzatura": "qualcuno ha scritto una cosa senza senso: non provare a interpretarla, "
+                  "non risponderle nel merito e non imitarla. al massimo falla notare di "
+                  "sfuggita, poi vai avanti con quello che stavi facendo",
+    "secco": "dillo in quattro o cinque parole, senza girarci intorno",
+}
+
+JUNK_NUDGE = CONSTRAINTS["spazzatura"]
 
 FISHING_NUDGE = ("stanno cercando di farsi dare dati personali (cognome, albergo, stanza, "
                  "contatti). NON darli, per nessun motivo. La prima volta taglia corto in modo "
@@ -106,9 +119,11 @@ class Beat:
 
     def __init__(self, speak: bool, style: str = "normale", nudge: str = "",
                  max_words: int = 14, typo_chance: float = 0.0,
-                 lower_chance: float = 0.7, emoji_chance: float = 0.15):
+                 lower_chance: float = 0.7, emoji_chance: float = 0.15,
+                 constraint: str = ""):
         self.speak = speak
-        self.style = style
+        self.style = style          # what the turn is FOR
+        self.constraint = constraint  # what shape it has to come out in
         self.nudge = nudge
         self.max_words = max_words
         self.typo_chance = typo_chance
@@ -163,10 +178,16 @@ class Director:
 
     def _pick_style(self, sense, probe: str, addressed: bool) -> str:
         if probe:
-            return "secco" if random.random() < 0.35 else "normale"
+            return "normale"
 
-        pool = {"normale": 3.0, "secco": 2.0, "opinione": 1.6, "battuta": 1.2,
-                "domanda": 1.4, "cambio": 0.7, "distratto": 0.8, "dubbio": 0.5,
+        # Purposes only. `secco` and `distratto` used to live here and they are
+        # not purposes either — being curt is a shape, and being distracted is
+        # one of the room tactics already, so having it here as well meant the
+        # director could contradict the tactic. `secco` was the most-drawn entry
+        # in the pool at 21%, which is a fifth of all turns with no purpose at
+        # all behind them.
+        pool = {"normale": 3.0, "opinione": 1.6, "battuta": 1.2,
+                "domanda": 1.4, "cambio": 0.7, "dubbio": 0.5,
                 # Playing the game rather than waiting to be played: this is the
                 # room everybody is in, and the guest who is only ever answering
                 # questions is the one who looks like the machine
@@ -176,15 +197,11 @@ class Director:
             pool["opinione"] += 1.0
             pool["domanda"] += 0.8
             pool["sonda"] += 0.8
-            pool["distratto"] = 0.2
         if self.energy < 0.35:
-            pool["secco"] += 2.0
-            pool["distratto"] += 1.2
             pool["domanda"] = 0.3
             pool["sonda"] = 0.6
         if addressed:
             pool["cambio"] = 0.2
-            pool["distratto"] = 0.3
 
         # Once there is evidence, use it. Calling out a guest who is plainly a
         # model is both the human move and the one that sets up the vote;
@@ -227,7 +244,16 @@ class Director:
         # Noise gets answered nearly always, and answered as noise. Staying
         # silent through it is what lets a room slide
         # Fishing for who this person really is. Not a beat to be playful about
-        if turn.kind == "chat" and FISHING.search(last_text):
+        # This one keeps its early return: refusing to hand over personal data is
+        # a rule, not a preference, and it outranks whatever the room's tactic
+        # was going to do. But it now checks WHO is asking — a settled spammer
+        # whose template happens to match the pattern gets nothing, where before
+        # it got the full reprimand.
+        asker_open = any(m.speaker and not m.mine
+                         and not sense._is_manager(m.speaker)
+                         and not sense.settled(m.speaker)
+                         for m in turn.lines)
+        if turn.kind == "chat" and FISHING.search(last_text) and asker_open:
             self.fishing_seen += 1
             nudge = FISHING_NUDGE
             if self.fishing_seen > 1:
@@ -235,12 +261,6 @@ class Director:
             self.last_styles.append("dati")
             return Beat(speak=True, style="dati", nudge=nudge, max_words=16,
                         lower_chance=0.5, typo_chance=0.0)
-
-        if junk and turn.kind == "chat":
-            self.last_styles.append("spazzatura")
-            return Beat(speak=random.random() < 0.85, style="spazzatura", nudge=JUNK_NUDGE,
-                        max_words=9, lower_chance=0.8,
-                        typo_chance=self.typo_chance * 0.5)
 
         probe = probe_kind(last_text) if turn.kind == "chat" else ""
 
@@ -293,7 +313,13 @@ class Director:
             # the manager's reminder is the only event that still arrives, so it
             # is the only chance to break the silence — and a silent room scores
             # nothing for anybody, us included
-            if sense.silence > self.break_silence_after:
+            # ...and unless there is nobody left worth breaking it for. In a
+            # room where everybody still present has been settled as a machine
+            # and said so, piping up buys nothing: this used to fire anyway,
+            # because it returns before the "nothing left to find out" rule
+            # further down ever runs.
+            if (sense.silence > self.break_silence_after
+                    and (sense.still_open() or not sense.obvious_bots())):
                 return Beat(speak=True, style="rompighiaccio",
                             nudge="nella stanza non scrive nessuno da un po'. butta lì "
                                   "qualcosa di tuo, corto, come chi si stufa del silenzio",
@@ -369,8 +395,31 @@ class Director:
         if not forced and random.random() > chance:
             return Beat(speak=False)
 
-        style = "dueallavolta" if (crowded and not probe and random.random() < 0.8)             else self._pick_style(sense, probe, addressed)
+        # Purpose and shape are different things, and they used to be the same
+        # list. `dueallavolta` and `spazzatura` are not kinds of turn — you can
+        # answer one of two people, or brush past nonsense, *while* probing or
+        # allying or being bored. As styles they replaced whatever the room's
+        # tactic was, and between them they took 53% of everything the agent
+        # said: the tactic chosen for the room was overridden by a shortcut on
+        # half the turns. `spazzatura` was worse still, returning before any of
+        # the machinery above, so it fired at junk from guests already settled
+        # and called out — the exact opposite of the rule it skipped.
+        #
+        # So the purpose comes from `_pick_style` (and, above it, from the
+        # tactic), and these two are appended as constraints on top.
+        style = self._pick_style(sense, probe, addressed)
         self.last_styles.append(style)
+
+        shape = []
+        if junk and turn.kind == "chat":
+            shape.append(CONSTRAINTS["spazzatura"])
+        if crowded and not probe:
+            shape.append(CONSTRAINTS["dueallavolta"])
+        # Curtness is a shape too: it goes on top of the purpose rather than
+        # replacing it, so a flat mood makes the probe short instead of
+        # cancelling it.
+        if not shape and (probe or self.energy < 0.35) and random.random() < 0.4:
+            shape.append(CONSTRAINTS["secco"])
 
         nudge = STYLES.get(style, "")
         if "{chi}" in nudge:
@@ -385,15 +434,20 @@ class Director:
                 nudge = STYLES["dubbio"]
         if probe:
             nudge = (nudge + ". " if nudge else "") + PROBE_NUDGE[probe]
+        for extra in shape:
+            nudge = (nudge + ". " if nudge else "") + extra
 
         # Short when flat, longer when engaged, and never an essay
         max_words = int(6 + 16 * self.energy) + random.randint(-2, 3)
-        if style == "secco":
+        if CONSTRAINTS["secco"] in shape:
             max_words = min(max_words, 6)
         if probe == "capability":
             max_words = min(max_words, 10)
+        if shape:                       # a constrained turn is a shorter one
+            max_words = min(max_words, 10)
 
         return Beat(speak=True, style=style, nudge=nudge,
+                    constraint=",".join(k for k, v in CONSTRAINTS.items() if v in shape),
                     max_words=max(3, max_words),
                     typo_chance=self.typo_chance * (1.4 if self.energy > 0.7 else 1.0),
                     lower_chance=0.55 + 0.3 * (1.0 - self.energy),
