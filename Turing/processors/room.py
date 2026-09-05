@@ -656,6 +656,22 @@ class RoomSense:
         return {n: self.speakers[n].read(shares.get(n), self.markers)
                 for n in self.heard}
 
+    # Blatant enough that everybody in the room can see it. The point is not
+    # detection — the analyst does that at the end, on the full transcript —
+    # it is self-defence: an obvious bot drags whoever answers it down with
+    # it, and the turns spent replying are turns not spent on the people.
+    # Better not to see it at all, while knowing it is there.
+    #
+    # Thresholds from 615 measured readings. The bot axis is bimodal with a
+    # cliff: 14.5% reach 0.60 and 0.2% reach 0.62, nothing in between, because
+    # in practice one term saturates alone — writes tidy, writes long, never
+    # writes short. Asking for two agreeing signals would therefore be asking
+    # for something that does not occur. So the second condition is the
+    # absence of the other axis instead: 86 of those 89 readings also had the
+    # human score under 0.35, and a guest who is all machine-evidence and no
+    # human-evidence is the one nobody would argue about.
+    BLATANT_BOT, BLATANT_NOT_HUMAN = 0.60, 0.35
+
     def settled(self, name: str) -> str:
         """"bot" when a guest has removed all doubt, otherwise "".
 
@@ -663,7 +679,14 @@ class RoomSense:
         and is worth spending turns on; these are not.
         """
         speaker = self.speakers.get(name)
-        return "bot" if speaker and speaker.mechanical() else ""
+        if not speaker or speaker.count < 4:
+            return ""                    # too early to be sure of anything
+        if speaker.mechanical():
+            return "bot"                 # a template or a metronome, no doubt
+        human, bot = speaker.read(self.shares().get(name), self.markers)
+        if bot >= self.BLATANT_BOT and human < self.BLATANT_NOT_HUMAN:
+            return "bot"
+        return ""
 
     def obvious_bots(self) -> list[str]:
         return [n for n in self.heard if self.settled(n)]
