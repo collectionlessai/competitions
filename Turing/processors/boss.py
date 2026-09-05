@@ -373,6 +373,9 @@ def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
     return blocks[0], blocks[1:] or [""]
 
 
+# A verdict label, with or without the brackets the prompt asks for.
+LABEL = re.compile(r"\[?\b(PERSONA|MACCHINA|NIENTE)\b\]?")
+
 L_BAIT = (
     "L'ESCA CHE HAI MESSO\n"
     "{question}\n"
@@ -1103,11 +1106,21 @@ class Boss(torch.nn.Module):
         thing: the reasoning is for the analyst's benefit, and passing all of it
         to the vote would bury the finding in its own working.
         """
+        # The label arrives without its brackets 22.5% of the time — "Gus:
+        # MACCHINA - ha confermato la cosa falsa" instead of "[MACCHINA]".
+        # Reading only the bracketed form threw those away, and they were
+        # disproportionately the MACCHINA verdicts the bait had just earned:
+        # the vote then saw a name with prose beside it and no verdict. So
+        # both forms count, and the output is normalised to the bracketed one
+        # because that is what the vote is taught to read.
         marked = [ln.strip() for ln in (answer or "").splitlines()
-                  if "[PERSONA]" in ln or "[MACCHINA]" in ln or "[NIENTE]" in ln]
+                  if LABEL.search(ln)]
         if marked:
-            line = marked[-1]
-            return line if line.lower().startswith(name.lower()) else f"{name}: {line}"
+            line = LABEL.sub(lambda m: f"[{m.group(1).upper()}]", marked[-1], count=1)
+            # The model often repeats the name: "Gus: Gus: MACCHINA".
+            while line.lower().startswith(f"{name.lower()}:"):
+                line = line[len(name) + 1:].lstrip()
+            return f"{name}: {line}"
         # No label at all — the answer was cut off, or it wandered. There used
         # to be a fallback here that took the last line of whatever came back
         # and handed it to the vote under this guest's name. Measured live, an
