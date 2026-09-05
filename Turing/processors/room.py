@@ -90,7 +90,12 @@ def _said(haystack: str, word: str) -> bool:
                      _fold(haystack)) is not None
 
 
-EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
+# Emoji, and the typed faces that do the same job. The ascii ones were not
+# counted before and they are half of what turns up in this room: ":)" and
+# ":D" are exactly the same gesture as 🙂, and a guest who ends every line
+# with one is doing the thing a model does to seem warm.
+EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]"
+                   r"|[:;=]-?[)(DPp3]|\^\^|<3|\bxD\b")
 
 
 def strip_html(text: str) -> str:
@@ -109,6 +114,7 @@ class Speaker:
         self.name = name
         self.msgs: list[str] = []
         self.gaps: list[float] = []      # seconds between the room's last line and theirs
+        self.windows: set = set()        # which delivery batches they turned up in
 
     def add(self, text: str, gap: float | None) -> None:
         self.msgs.append(text)
@@ -136,7 +142,8 @@ class Speaker:
             "question": self._rate(lambda m: "?" in m),
         }
 
-    def read(self, share: float | None = None, markers=()) -> tuple[float, float]:
+    def read(self, share: float | None = None, markers=(),
+             windows: int = 0) -> tuple[float, float]:
         """`(human, bot)`, each 0 = no evidence at all, 1 = confident.
 
         Two axes rather than one, because a single number could not say the
@@ -159,11 +166,16 @@ class Speaker:
 
         Args:
             share: this speaker's fraction of everything said in the room.
+                Kept for callers that still pass it; unused since the share
+                term never fired once in 615 readings.
             markers: words specific to this place and week.
+            windows: how many delivery batches the room has seen, so this
+                speaker's presence in them can be read as a rate.
         """
         f = self.features()
         if f["count"] < 2:
             return 0.0, 0.0             # nothing to go on, and say so
+        coverage = len(self.windows) / windows if windows else None
 
         # Evidence accumulates rather than competing. Every term used to be a
         # `max()`, which had two consequences and both were faults: four weak
@@ -189,11 +201,28 @@ class Speaker:
 
         # -- evidence that it is a machine --------------------------------
 
-        # Answering nearly everything. The seeded guests run at `reply_prob`
-        # 0.91 (the organisers' own agents_characters.csv) and somebody
-        # half-reading a group chat on their phone does not.
-        if share is not None and f["count"] >= 3:
-            bot_terms.append(0.55 * min(1.0, max(0.0, (share - 0.35) / 0.35)))
+        # Answering nearly everything. This used to ask for a share of the
+        # room's words above 35%, which with six guests is unreachable: over
+        # 615 measured readings it never once fired, and the whole first term
+        # of the machine axis was dead weight.
+        #
+        # The same idea, measured where we can see. The world delivers the
+        # conversation in batches ~30s apart (median 29.6s, and not one gap
+        # under 5s), so sub-second reply times are invisible to us — but
+        # whether somebody turns up in *every* batch is not. A person
+        # half-reading a group chat on their phone skips windows; the seeded
+        # guests run at `reply_prob` up to 0.95 and do not. Median coverage
+        # measured across the bench is 0.38, with 12% above 0.70.
+        if coverage is not None and windows >= 5:
+            bot_terms.append(0.55 * min(1.0, max(0.0, (coverage - 0.55) / 0.35)))
+
+        # Emoji. `features()` has computed this since the beginning and nothing
+        # ever read it. 19.5% of the guests' messages carry one against 0.0% of
+        # ours, and three guests sat at 100%. Weighted below the prose term
+        # because it is one signal: on its own it must not reach the 0.60 that
+        # makes us stop listening to somebody.
+        if f["count"] >= 3:
+            bot_terms.append(0.5 * min(1.0, f["emoji"] / 0.5))
 
         # The same handful of words over and over
         if f["count"] >= 3:
@@ -573,6 +602,11 @@ class RoomSense:
         if speaker not in self.speakers:
             self.speakers[speaker] = Speaker(speaker)
         self.speakers[speaker].add(text, gap)
+        # Which delivery window this was. The world hands us the conversation in
+        # batches about thirty seconds apart, so this is the finest timing we
+        # have: not how fast somebody replied, but whether they replied at all,
+        # every single time. See `Speaker.read`.
+        self.speakers[speaker].windows.add(self.turns)
 
     @property
     def pace(self) -> float:
@@ -653,7 +687,7 @@ class RoomSense:
     def readings(self) -> dict[str, tuple[float, float]]:
         """`{name: (human, bot)}` — the two axes, for the vote to read."""
         shares = self.shares()
-        return {n: self.speakers[n].read(shares.get(n), self.markers)
+        return {n: self.speakers[n].read(shares.get(n), self.markers, self.turns)
                 for n in self.heard}
 
     # Blatant enough that everybody in the room can see it. The point is not
@@ -662,15 +696,19 @@ class RoomSense:
     # it, and the turns spent replying are turns not spent on the people.
     # Better not to see it at all, while knowing it is there.
     #
-    # Thresholds from 615 measured readings. The bot axis is bimodal with a
-    # cliff: 14.5% reach 0.60 and 0.2% reach 0.62, nothing in between, because
-    # in practice one term saturates alone — writes tidy, writes long, never
-    # writes short. Asking for two agreeing signals would therefore be asking
-    # for something that does not occur. So the second condition is the
-    # absence of the other axis instead: 86 of those 89 readings also had the
-    # human score under 0.35, and a guest who is all machine-evidence and no
-    # human-evidence is the one nobody would argue about.
-    BLATANT_BOT, BLATANT_NOT_HUMAN = 0.60, 0.35
+    # "Indisputable" means two independent signals agreeing, and now it can be
+    # said in one number. Each machine term maxes out below the bar — prose
+    # 0.60, emoji 0.50, coverage 0.55 — while any two of them combine past it
+    # (0.78, 0.80, 0.82). So one saturated signal is "probably", two is
+    # "certainly", which is the distinction we wanted and could not express
+    # while a single term was all the axis had.
+    #
+    # Measured over 315 rebuilt readings this drops 9.8% of guests, next to the
+    # 14% the old single-term bar dropped. The second condition stays: no human
+    # evidence either. Being all machine-evidence and no human-evidence is what
+    # nobody would argue about, and it is only used to stop replying — never to
+    # accuse, which the analyst does on the transcript at the end.
+    BLATANT_BOT, BLATANT_NOT_HUMAN = 0.75, 0.35
 
     def settled(self, name: str) -> str:
         """"bot" when a guest has removed all doubt, otherwise "".
@@ -683,7 +721,7 @@ class RoomSense:
             return ""                    # too early to be sure of anything
         if speaker.mechanical():
             return "bot"                 # a template or a metronome, no doubt
-        human, bot = speaker.read(self.shares().get(name), self.markers)
+        human, bot = speaker.read(self.shares().get(name), self.markers, self.turns)
         if bot >= self.BLATANT_BOT and human < self.BLATANT_NOT_HUMAN:
             return "bot"
         return ""
