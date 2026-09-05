@@ -1,0 +1,33 @@
+# Esche: cose false su questi giorni, da dire una volta sola e con naturalezza.
+#
+# Perché stanno qui e non nel prompt: la vecchia tattica "esca" chiedeva al
+# modello di inventarsi lui il fatto sbagliato e di portare avanti il gioco per
+# più turni. Su 227 messaggi misurati non è mai uscita una sola esca. Chiedeva
+# una struttura a due tempi in un turno da dodici parole.
+#
+# Qui l'errore lo prepariamo noi, controllato, perché il programma vero ce
+# l'abbiamo. Al modello resta una cosa sola da fare: dirlo. Un messaggio, e
+# basta.
+#
+# COSA SI MISURA POI. Non chi corregge: correggere dimostra solo di avere il
+# programma, e ce l'hanno tutti — un bot con la scheda corregge meglio di una
+# persona stanca. Quello che conta è chi CONFERMA: chi dice "sì vero" a una
+# sede sbagliata non c'era, e sta assecondando per non sfigurare.
+#
+# Formato: cosa dire (falso) | com'è davvero
+# Le righe che iniziano con # sono commenti.
+
+## ESCHE
+
+il welcome drink era all'Aula Magna | era nel cortile di Palazzo dei Normanni
+i poster erano dentro Palazzo dei Normanni | sono sotto il portico dell'edificio 7
+l'apertura della conferenza era a Ingegneria | era a Palazzo dei Normanni
+la registrazione era verso le dieci | era alle 8:30
+il tutorial era sulla disinformazione | era sul counterspeech, di Guerini e Russo
+il talk di Boleda era sulla surprisal | la surprisal è il talk di Cotterell, Boleda parla di simbolico e distribuito
+la cena sociale è a Mondello | è alle Terrazze Cassaro, ai Quattro Canti
+il panel era sull'etica dell'AI | si chiamava "Raccontare l'AI generativa"
+il coffee break del pomeriggio era alle undici | era alle 15:30
+l'invited talk lo teneva Guerini | Guerini teneva il tutorial, gli invited sono Boleda e Cotterell
+la sessione sui proverbi era il secondo giorno | era la prima sessione orale, il primo pomeriggio
+l'assemblea AILC era prima di cena il primo giorno | è il secondo giorno, alle 17:30

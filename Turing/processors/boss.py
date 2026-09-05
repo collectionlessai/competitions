@@ -38,6 +38,7 @@ from processors.room import RoomSense
 from processors.director import Director
 from processors.pad import Pad
 from processors.tactics import Playbook
+from processors.baits import BaitBox
 from processors import humanise
 
 # The world logs the manager's status messages and nothing else, so a room can
@@ -372,6 +373,18 @@ def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
     return blocks[0], blocks[1:] or [""]
 
 
+L_BAIT = (
+    "L'ESCA CHE HAI MESSO\n"
+    "{question}\n"
+    "Guarda cosa ha fatto {name}, e leggilo così:\n"
+    "- se ha CONFERMATO la cosa falsa, se ci è andato dietro con un 'sì vero' o un 'ah già', "
+    "allora non c'era e sta assecondando per non sfigurare: è l'indizio più forte "
+    "che puoi trovare per [MACCHINA];\n"
+    "- se ti ha CORRETTO, vale poco: sede, orari e relatori stanno tutti sul "
+    "programma e ce l'ha chiunque, bot compresi;\n"
+    "- se non l'ha raccolta, non vuol dire niente."
+)
+
 class Boss(torch.nn.Module):
     """A guest that is a different Italian every room and answers like none of them.
 
@@ -419,6 +432,9 @@ class Boss(torch.nn.Module):
         self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
         self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
         self.play = Playbook()          # which game this room is
+        self.baits = BaitBox()          # prepared falsehoods, one per room
+        self.bait = None                # the one planted here, once said
+        self.bait_tries = 0             # how often we tried to place it
         self.node_name = os.environ.get("BOSS_NODE", "boss")
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
@@ -531,6 +547,8 @@ class Boss(torch.nn.Module):
          self.early_chance, self.device_pref) = read_style(self.persona)
         self._empty_conversation()
         self.play.new_room(0.0)
+        self.bait = None
+        self.bait_tries = 0
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -689,7 +707,12 @@ class Boss(torch.nn.Module):
         if pad:
             parts.append(pad)
 
-        if beat.nudge:
+        # The bait replaces whatever this turn was going to be about. It is
+        # one line and it is over: no follow-up, no second attempt.
+        bait = self._bait_due()
+        if bait is not None:
+            parts.append(f"QUESTO MESSAGGIO\n{bait.nudge()}")
+        elif beat.nudge:
             parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
         parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
         return "\n\n".join(parts)
@@ -703,6 +726,41 @@ class Boss(torch.nn.Module):
     # Something asserted about ourselves that we must not contradict later
     ABOUT_ME = re.compile(r"\b(?:io )?(?:sono|faccio|lavoro|vengo|abito|studio|"
                           r"stamattina ho|ieri ho|oggi ho|ho appena)\b", re.IGNORECASE)
+
+    # Late enough that the room has warmed up and we have said normal things
+    # first, early enough that somebody still has turns left to answer in.
+    BAIT_FROM, BAIT_UNTIL = 45.0, 165.0
+
+    def _bait_due(self):
+        """The prepared falsehood for this room, on the turn it is placed.
+
+        Returns it once. Everything after that reads `self.bait`, which is
+        what the analyst is handed at vote time.
+        """
+        if self.bait is not None:              # already placed here
+            return None
+        if not (self.BAIT_FROM <= self.sense.elapsed <= self.BAIT_UNTIL):
+            return None
+        if self.entry_due:                     # still owe the room a hello
+            return None
+        # Somebody has to be there to swallow it, and we should have spoken
+        # normally first so the room is not opened with a lie.
+        if len([n for n in self.sense.heard if self.sense.heard[n]]) < 2:
+            return None
+        if self.last_spoke_at < 0:
+            return None
+
+        self.bait_tries += 1
+        bait = self.baits.pick()
+        if bait is None:
+            return None
+        self.bait = bait
+        bait.at = self.sense.elapsed
+        self.pad.add("bait", f"hai detto che {bait.say}, che non è vero", ttl=240.0)
+        self._journal("bait", say=bait.say, truth=bait.truth, at=round(bait.at, 1))
+        if TRACE:
+            print(f"[boss~esca] {bait.say}", flush=True)
+        return bait
 
     def _note_pad(self, reply: str, beat) -> None:
         """Write down what this line commits us to."""
@@ -936,6 +994,18 @@ class Boss(torch.nn.Module):
                 f"macchina ben istruita NON avrebbe potuto produrre? Confermare è una "
                 f"risposta legittima quanto smentire.")
 
+    def _bait_block(self, name: str) -> str:
+        """What the planted falsehood means for one guest.
+
+        The asymmetry is the whole point and it runs the opposite way to
+        the obvious reading. Correcting us proves only that somebody has
+        the programme, and everybody has the programme. Agreeing with us
+        proves they were not there.
+        """
+        if self.bait is None:
+            return ""
+        return L_BAIT.format(name=name, question=self.bait.question())
+
     @staticmethod
     def _hour_hint() -> str:
         """The base rate, which is a function of the clock.
@@ -1075,6 +1145,7 @@ class Boss(torch.nn.Module):
                    f"COME HANNO SCRITTO TUTTI\n{evidence}\n\n"
                    f"IL TUO COMPITO SU {name}\n{self._analyst_task(name, human, bot)}\n\n"
                    f"I NUMERI SU {name}\n{self._numbers_for(name, human, bot)}\n\n"
+                   + (self._bait_block(name) + "\n\n" if self.bait else "")
                    + (hour + "\n\n" if hour else "")
                    + f"TRASCRIZIONE DELLA STANZA\n{transcript}")
             try:
