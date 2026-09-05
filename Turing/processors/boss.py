@@ -577,8 +577,11 @@ class Boss(torch.nn.Module):
         self.next_reply_chars = 0.0
         self.my_vote = None
         self.room_count += 1
+        # The whole persona, not the first 120 characters. Truncating it saved
+        # nothing worth saving and left the report showing a sentence cut in
+        # half, starting with the `# STILE:` housekeeping line.
         self._journal("room", me=self.sense.my_name,
-                      roster=list(self.sense.heard), persona=self.persona[:120])
+                      roster=list(self.sense.heard), persona=self.persona)
         # `recent_openers` deliberately kept: it is what stops every room from
         # opening the same way, and clearing it here is why "ciao gente" was
         # the first two words of ten separate messages.
@@ -1393,13 +1396,19 @@ class Boss(torch.nn.Module):
         if TRACE:
             print(f"[boss<-] {sample[:160]!r}", flush=True)
         turn = self.sense.read(sample, messages)
+
+        # Open the new room before writing anything down. `sense.read()` has
+        # already reset the clock by the time we get here, so journalling this
+        # batch first files the new room's opening seconds under the old room's
+        # number — which is why every room in the report ended with a run of
+        # messages at 0s.
+        if turn.kind == "start":
+            self._new_room()
+
         for line in turn.lines:
             if line.speaker and not line.mine:
                 self._journal("heard", speaker=line.speaker, text=line.text[:400])
         self._journal_scores()
-
-        if turn.kind == "start":
-            self._new_room()
 
         if turn.kind == "vote":
             vote = self._vote()

@@ -29,23 +29,35 @@ def esc(value) -> str:
 
 
 def load(folder: str) -> dict:
-    """Every agent's journal in `folder`, split into rooms."""
+    """Every agent's journal in `folder`, split into rooms.
+
+    Split on the journal's own `room` counter rather than on the appearance of
+    a `room` event. The two are not the same at the seam: `t` is seconds
+    elapsed inside the room, and it is reset when the world moves us on —
+    *before* the next `room` event gets written. Grouping on the events
+    therefore drops the last handful of the old room, and the tail of every
+    room read as a run of messages at 0s.
+    """
     agents = {}
     for path in sorted(glob.glob(os.path.join(folder, "*.jsonl"))):
         name = os.path.basename(path).replace(".jsonl", "")
-        rooms, current = [], None
+        rooms, current, number = [], None, None
         with open(path, encoding="utf-8") as handle:
             for line in handle:
                 try:
                     event = json.loads(line)
                 except ValueError:
                     continue
-                if event.get("kind") == "room":
-                    current = {"head": event, "events": []}
+                where = event.get("room")
+                if where != number or current is None:
+                    number = where
+                    current = {"head": {}, "events": []}
                     rooms.append(current)
-                elif current is not None:
+                if event.get("kind") == "room":
+                    current["head"] = event
+                else:
                     current["events"].append(event)
-        agents[name] = rooms
+        agents[name] = [r for r in rooms if r["events"]]
     return agents
 
 
@@ -172,8 +184,13 @@ def render_event(event, zero: float, tactics: bool = True, bait_words=frozenset(
 
 def render_room(agent: str, room: dict, index: int) -> str:
     head = room["head"]
-    zero = head.get("t", 0.0)
+    # `t` is already seconds inside the room, so there is nothing to subtract.
+    zero = 0.0
     persona = head.get("persona") or ""
+    style = ""
+    if persona.startswith("# STILE:"):
+        style, _, persona = persona.partition("\n")
+        style = style[len("# STILE:"):].strip()
     roster = ", ".join(head.get("roster") or []) or "(nessuno ancora)"
 
     events = [e for e in room["events"] if e.get("kind") in KINDS_SHOWN]
@@ -188,7 +205,8 @@ def render_room(agent: str, room: dict, index: int) -> str:
 <section class="room">
   <h3>{esc(agent)} &middot; stanza {index} &middot; in scena come <b>{esc(head.get("me"))}</b></h3>
   <div class="roomhead">
-    <div><span class="lbl">persona</span>{esc(persona)}</div>
+    <div><span class="lbl">persona</span>{esc(persona.strip())}</div>
+    {f'<div><span class="lbl">grafia</span>{esc(style)}</div>' if style else ""}
     <div><span class="lbl">presenti all'apertura</span>{esc(roster)}</div>
   </div>
   <div class="timeline">{body}</div>
