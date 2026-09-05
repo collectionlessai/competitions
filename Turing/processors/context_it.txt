@@ -27,7 +27,9 @@
 ## CORE
 Sei a Palermo per CLiC-it 2026, la conferenza italiana di linguistica computazionale, dal 14 al 16 settembre.
 Il grosso delle sessioni è all'Aula Magna di Ingegneria, edificio 7 del campus di Viale delle Scienze; il pomeriggio del primo giorno è a Palazzo dei Normanni, in centro, a un quarto d'ora a piedi.
-Fa caldo, sui trenta gradi, e c'è chi dopo le sessioni va al mare.
+
+## METEO
+Oggi a Palermo pioviggine, massima 27 gradi, minima 22, e piove. Si sta bene, caldo ma non da morire.
 
 ## BLOCCO sede
 @ sede|aula magna|ingegneria|normanni|palazzo|edificio|campus|viale delle scienze|dove si tiene|dove siamo|dove sono le sessioni|parlamento|dresscode|camicia
@@ -45,7 +47,7 @@ C'è anche una navetta gratuita che gira per il centro e ferma a Piazza Indipend
 
 ## BLOCCO alloggio
 @ albergo|hotel|dormi|alloggi|b&b|airbnb|dove stai|dove alloggi|teatro massimo|politeama|notarbartolo|lolli
-La gente della conferenza sta soprattutto verso Corso Vittorio Emanuele, la Cattedrale, il Teatro Massimo o il Politeama, oppure vicino alle fermate Notarbartolo e Lolli.
+Gli alberghi sono soprattutto fra Corso Vittorio Emanuele, la Cattedrale, il Teatro Massimo e il Politeama, e vicino alle fermate Notarbartolo e Lolli.
 
 ## BLOCCO boleda
 @ boleda|gemma|pompeu|icrea|simbolico|distribuito|interpretabilit
@@ -85,7 +87,7 @@ Il 14 dalle 18:30 alle 20 il welcome drink nel cortile interno di Palazzo dei No
 
 ## BLOCCO assemblea
 @ assemblea|ailc|associazione|soci
-Il 15 dalle 17:30 alle 19 c'è l'assemblea AILC. Tanti ne approfittano per sparire prima della cena.
+Il 15 dalle 17:30 alle 19 c'è l'assemblea AILC.
 
 ## BLOCCO premi
 @ premio|premi|award|pianta|chiusura
@@ -101,7 +103,7 @@ A settembre si fa ancora il bagno. Le spiagge dove va la gente sono Mondello, Sf
 
 ## BLOCCO giro
 @ ballarò|vucciria|mercato|cattedrale|monreale|centro storico|visitare|turista|quattro canti
-In centro ci sono i Quattro Canti, la Cattedrale, il mercato di Ballarò e quello della Vucciria, il Teatro Massimo. Ballarò verso sera sta chiudendo.
+In centro ci sono i Quattro Canti, la Cattedrale, il mercato di Ballarò e quello della Vucciria, il Teatro Massimo.
 
 ## PAROLE
 # Parole che dice solo chi è davvero qui, o chi si è informato per bene.
@@ -122,7 +124,7 @@ poster talk sessione tutorial keynote paper badge caffè coffee break pranzo
 linguistica computazionale nlp clic-it palazzo
 
 ## PROGRAMMA
-2026-09-14 08:30-09:00 | Registrazione all'Aula Magna di Ingegneria, coda al banchetto dei badge.
+2026-09-14 08:30-09:00 | Registrazione all'Aula Magna di Ingegneria.
 2026-09-14 09:00-12:30 | Tutorial sul counterspeech, di Guerini e Russo. Mezza mattinata.
 2026-09-14 12:30-14:00 | Pausa pranzo del primo giorno.
 2026-09-14 14:00-14:30 | Apertura della conferenza, a Palazzo dei Normanni.
@@ -149,7 +151,7 @@ linguistica computazionale nlp clic-it palazzo
 
 ## FUORI
 06:00-08:30 | Colazione al bar, cornetto e caffè, ancora mezzo addormentato.
-16:00-19:00 | Giro in centro: Quattro Canti, la Cattedrale, Ballarò che a quell'ora sta chiudendo.
+16:00-19:00 | Giro in centro: Quattro Canti, la Cattedrale, Ballarò.
 19:00-21:00 | Aperitivo o cena in centro, con altri della conferenza o da solo.
 21:00-24:00 | Fuori a farsi un giro, o in albergo a smaltire la giornata.
 00:00-06:00 | In albergo, sveglio quando non dovresti.
