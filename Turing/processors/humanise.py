@@ -720,6 +720,26 @@ def invents_conference(text: str, known) -> str:
     return ""
 
 
+# Words the model reaches for in English when the Italian was right there.
+# Measured live: "today" turned up in three of nine messages, always where
+# "oggi" belongs — "il talk di today su stereotipi di genere". Dropping those
+# messages cost a third of the turns in that room for one word, which is a bad
+# trade: the rest of the sentence was fine. So these are repaired rather than
+# refused, and only what survives the repair is judged.
+TRADUZIONI = (
+    ("today", "oggi"), ("tomorrow", "domani"), ("yesterday", "ieri"),
+    ("tonight", "stasera"), ("this morning", "stamattina"),
+)
+
+
+def repair_english(text: str) -> str:
+    """Put back the Italian word the model swapped for an English one."""
+    for english, italian in TRADUZIONI:
+        text = re.sub(r"\b" + re.escape(english) + r"\b", italian,
+                      text, flags=re.IGNORECASE)
+    return text
+
+
 def has_english(text: str) -> bool:
     """Whether an English function word has leaked into the Italian."""
     return bool(INGLESE.search(text))

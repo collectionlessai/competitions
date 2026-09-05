@@ -959,6 +959,11 @@ class Boss(torch.nn.Module):
                 print(f"[boss--] parola inventata {reply!r}", flush=True)
             return ""
 
+        # Swap back the English word before anything judges the sentence: a
+        # message is not worth throwing away over "today" when "oggi" was
+        # meant, and three of nine turns in one room went that way.
+        reply = humanise.repair_english(reply)
+
         # A talk, a session or a speaker that does not exist. Seen live as
         # "mi mancano le cose del professor Rossi" and "la sessione sul
         # parsing automatico". This is the worst thing we can say, by our
