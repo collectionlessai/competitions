@@ -190,6 +190,23 @@ DANGLING = {
 }
 
 
+# Openers that carry no content on their own. Cutting at the comma after one
+# of these keeps the throat-clearing and throws away the sentence: seen live
+# as "beh, se proprio vogliamo essere sinceri" and "ehm, a meno che non mi
+# sbagli", which say nothing and read as a message that broke.
+PREAMBOLO = re.compile(
+    r"^\s*(?:beh|boh|ehm|mah|allora|senti|senta|sentite|cio[eè]|insomma|"
+    r"guarda|guardate|dai|va beh|vabb[eè]|niente|comunque|per[oò]|"
+    r"se\b|quando\b|mentre\b|anche se|dato che|visto che|a meno che|"
+    r"nel caso|magari|forse|secondo me|a dire il vero|per essere onesti)",
+    re.IGNORECASE)
+
+
+def _is_preamble(head: str) -> bool:
+    """Whether this fragment is throat-clearing rather than a thought."""
+    return bool(PREAMBOLO.match(head))
+
+
 def cap_words(text: str, limit: int) -> str:
     """Cut to `limit` words, but only where the cut leaves a whole thought.
 
@@ -215,11 +232,40 @@ def cap_words(text: str, limit: int) -> str:
                 return head
     if ", " in cut:
         head = cut.rsplit(", ", 1)[0]
-        if len(head.split()) >= max(4, limit // 2):
+        if (len(head.split()) >= max(4, limit // 2)
+                and not _is_preamble(head)):
             return head
 
     # Nowhere clean to stop: let it run rather than amputate it
     return text
+
+
+# Words nothing can follow them from. Split in two on evidence: a preposition
+# or an article really cannot end a sentence, ever. A participle or an
+# auxiliary can — "ma quanti doppi sensi hai fatto?" and "ma tu di dove sei?"
+# are complete questions, and the first version of this flagged both. So those
+# only count when the line carries no closing mark at all, which is what
+# "allora, qualcuno ha visto" looks like.
+MOZZATO_SEMPRE = re.compile(
+    r"(?<![\'’])\b(?:di|da|in|con|su|per|tra|fra|il|lo|la|gli|le|un|uno|una|"
+    r"del|dello|della|dei|degli|delle|al|allo|alla|ai|agli|alle|nel|nella|"
+    r"e|o|ma|che|cui|come)\s*$", re.IGNORECASE)
+MOZZATO_SENZA_PUNTO = re.compile(
+    r"(?<![\'’])\b(?:visto|fatto|detto|preso|messo|dato|"
+    r"ho|hai|abbiamo|avete|hanno|sono|siamo|siete)\s*$", re.IGNORECASE)
+
+
+def ends_mid_sentence(text: str) -> bool:
+    """Whether the line stops on a word nothing can follow it from."""
+    body = text.strip()
+    if len(body.split()) < 3:
+        return False
+    if MOZZATO_SEMPRE.search(body.rstrip("?!.…")):
+        return True
+    # No closing mark of any kind: the generation ran out rather than ended.
+    if body[-1:] in "?!.…":
+        return False
+    return bool(MOZZATO_SENZA_PUNTO.search(body))
 
 
 def chat_case(text: str, lower_chance: float = 0.65, stop_chance: float = 0.2) -> str:

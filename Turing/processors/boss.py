@@ -879,7 +879,8 @@ class Boss(torch.nn.Module):
         # to salvage either way: a tidied-up "sono un assistente virtuale" is
         # still an assistant, and half a broken token is worse
         if (humanise.is_assistant(reply) or humanise.looks_broken(reply)
-                or humanise.is_flooded(reply)):
+                or humanise.is_flooded(reply)
+                or humanise.ends_mid_sentence(reply)):
             out = humanise.deflect(avoid=self.recent_deflections)
             self.recent_deflections = (self.recent_deflections + [out])[-4:]
             return humanise.safe(out)
