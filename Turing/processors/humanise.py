@@ -648,7 +648,11 @@ def has_invented_token(text: str) -> bool:
 INGLESE = re.compile(
     r"\b(?:inside|instead|however|actually|maybe|because|really|although|"
     r"therefore|besides|whereas|somehow|anyway|indeed|regarding|"
-    r"people|things|everyone|something|nothing|always|never)\b", re.IGNORECASE)
+    r"people|things|everyone|something|nothing|always|never|"
+    # Time words leak the same way: seen live as "il talk di today su
+    # stereotipi di genere", where an English adverb sat where a speaker name
+    # belongs. An Italian says oggi, and never mixes the two in one clause.
+    r"today|tomorrow|yesterday|tonight)\b", re.IGNORECASE)
 
 
 # Content invented about the conference. Harder than the invented token above,

@@ -1536,7 +1536,8 @@ class Boss(torch.nn.Module):
         self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
                       settled=self.sense.obvious_bots(), open=self.sense.still_open(),
                       pace=round(self.sense.pace, 1),
-                      tattica=self.play.current.name if self.play.current else None,
+                      tattica=(None if self.no_tactics or not self.play.current
+                               else self.play.current.name),
                       punteggi={n: [round(h, 2), round(b, 2)]
                                 for n, (h, b) in self.sense.readings().items()})
         self.conv.remember(reply)
