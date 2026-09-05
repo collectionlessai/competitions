@@ -818,6 +818,14 @@ class Boss(torch.nn.Module):
             print(f"[boss~esca] {bait.say}", flush=True)
         return bait
 
+    def _carries_bait(self, reply: str) -> bool:
+        """Whether this line actually contains the falsehood we meant to plant."""
+        if self.bait is None or not reply:
+            return False
+        said = set(re.findall(r"\w+", reply.lower()))
+        meant = set(re.findall(r"\w+", self.bait.say.lower()))
+        return len(said & meant) >= 2
+
     def _note_pad(self, reply: str, beat) -> None:
         """Write down what this line commits us to."""
         if self.PROPOSAL.search(reply):
@@ -1541,6 +1549,15 @@ class Boss(torch.nn.Module):
             return ""
 
         reply = self._say(beat, last)
+
+        # A bait that never left the room was never planted. The filters run
+        # after the model has answered, so a reply that gets dropped or turned
+        # into a deflection still consumed the bait — measured live, only four
+        # of twelve planted baits were actually said, the rest recorded next to
+        # "eh?" and "ho perso il filo". Put it back so a later turn can try.
+        if self.bait_this_turn and not self._carries_bait(reply):
+            self.bait, self.bait_this_turn = None, False
+
         if not reply:
             return ""
 
@@ -1566,6 +1583,10 @@ class Boss(torch.nn.Module):
             self.pending_tail = ""
             self.pending_correction = ""
             self.next_reply_chars = 0.0
+            # Same reasoning as above: this line is not going out, so whatever
+            # bait it was carrying has not been planted.
+            if self.bait_this_turn:
+                self.bait, self.bait_this_turn = None, False
             self._journal("dropped", text=reply, why="vecchia",
                           gen=round(self.last_call_seconds, 1), pace=round(self.sense.pace, 1))
             if TRACE:
