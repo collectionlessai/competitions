@@ -383,11 +383,8 @@ L_BAIT = (
     "- se ha CONFERMATO la cosa falsa, se ci è andato dietro con un 'sì vero' o un 'ah già', "
     "allora non c'era e sta assecondando per non sfigurare: è l'indizio più forte "
     "che puoi trovare per [MACCHINA];\n"
-    "- se ti ha CORRETTO, NON conta come prova che sia una persona. Sede, orari "
-    "e relatori stanno sul programma e ce l'hanno tutti: un bot con la "
-    "scheda in memoria corregge prima e meglio di uno stanco che c'era "
-    "davvero. Chi ti corregge ha dimostrato di avere il programma, e basta;\n"
-    "- se non l'ha raccolta, non vuol dire niente."
+    "- se NON ha confermato, non hai imparato niente su di lui da questa esca: "
+    "guarda altrove.\n"
 )
 
 class Boss(torch.nn.Module):
