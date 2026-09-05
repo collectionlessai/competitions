@@ -269,11 +269,29 @@ def ends_mid_sentence(text: str) -> bool:
 
 
 def chat_case(text: str, lower_chance: float = 0.65, stop_chance: float = 0.2) -> str:
-    """Lower case at the start, no full stop at the end. Questions keep their mark."""
+    """Lower case at the start, no full stop at the end. Questions keep their mark.
+
+    Raises the initial on the other side of the coin, which is the half that
+    was missing. The system prompt says "tutto minuscolo" and the model obeys
+    it 98% of the time, so `lower_chance` never had anything to do: measured
+    over 58 rooms, our median was 100% lowercase and 98% of rooms sat above
+    80%. Perfect obedience is itself the tell — a person on a phone writes
+    mostly lowercase, not always, because sometimes the keyboard capitalises
+    for them and they do not go back. So the coin now falls both ways.
+    """
     if not text:
         return text
-    if random.random() < lower_chance and not text[:1].isdigit():
-        text = text[0].lower() + text[1:]
+    if not text[:1].isdigit():
+        # The capital is a slip, not a coin toss: capped at one message in
+        # five however low `lower_chance` goes. The guests we are hiding among
+        # start 71% of their messages with a capital, so landing near half
+        # would be trading one signature for theirs.
+        capitalise = min(0.2, 1.0 - lower_chance)
+        roll = random.random()
+        if roll < lower_chance:
+            text = text[0].lower() + text[1:]
+        elif roll < lower_chance + capitalise and text[:1].islower():
+            text = text[0].upper() + text[1:]
     if text.endswith(".") and not text.endswith("...") and random.random() > stop_chance:
         text = text[:-1]
     return text

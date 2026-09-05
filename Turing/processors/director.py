@@ -64,8 +64,13 @@ STYLES = {
              "una domanda sola, corta, come chi sta cercando di capire chi è vero",
     "smaschera": "secondo te {chi} è un bot e ormai è evidente: dillo, con gusto, "
                  "e spiega in poche parole cosa l'ha tradito",
-    "allea": "uno di loro ti sembra una persona vera: dagli ragione, fai squadra, "
-             "punta insieme a lui su chi vi sembra finto",
+    # Allying is not being nice at somebody, it is recruiting them against a
+    # third. The old wording asked for warmth and got small talk: measured on
+    # real Turing tests, chit-chat is the commonest interrogation strategy and
+    # the least accurate one, so a turn spent being agreeable buys nothing.
+    "allea": "dai ragione a uno di loro e tiratelo dalla tua parte CONTRO un terzo: "
+             "digli cosa non ti torna di quell'altro e chiedigli se la vede come te. "
+             "serve a vedere se sta al gioco o se ti asseconda e basta",
     "domanda": "fai una domanda corta a uno di loro, senza cortesie",
     "cambio": "cambia discorso, tira su una cosa tua che non c'entra niente",
     "dubbio": "butta lì il dubbio che uno di loro non sia una persona vera, senza accusare apertamente",
@@ -78,6 +83,11 @@ STYLES = {
     # replacing it. `distratto` is gone entirely, being one of the room tactics.
     "secco": "rispondi secchissimo, quattro o cinque parole al massimo",
 }
+
+# The beats that end in a question mark. Kept as a set so the pool can be
+# damped after two of them running: asking something every single time is how
+# an assistant keeps a conversation alive, and a guest at a party does not.
+ASKING = frozenset(("sonda", "domanda", "dati"))
 
 # Not purposes: shapes. These say how the turn must come out, and they are meant
 # to sit on top of whatever the room's tactic is trying to achieve — you can
@@ -232,6 +242,15 @@ class Director:
         for style in set(self.last_styles[-4:]):
             if self.last_styles[-4:].count(style) >= 2:
                 pool[style] = pool.get(style, 1.0) * 0.4
+
+        # Three questions running is conversational maintenance, which is what
+        # an assistant does and a guest does not. Measured over 58 rooms, 17%
+        # of ours were above 80% questions, and four of the six most relentless
+        # askers in the whole bench were us. After two, ask for something else.
+        if len(self.last_styles) >= 2 and all(s in ASKING for s in self.last_styles[-2:]):
+            for style in ASKING:
+                if style in pool:
+                    pool[style] *= 0.25
 
         names, weights = list(pool.keys()), list(pool.values())
         return random.choices(names, weights=weights)[0]
