@@ -140,5 +140,13 @@ class Pad:
                          "Non cambiare argomento come se non l'avessi mai detta.")
         if reads:
             lines.append("Cosa pensi degli altri finora: " + "; ".join(reads[-3:]))
+        # The planted falsehood is here so we do not walk it back if somebody
+        # corrects us — a person who misremembered says "ah sì, giusto" and
+        # moves on. It is deliberately not an instruction to push it again:
+        # repeating a bait is what makes it look like a test.
+        bait = self.open_bait()
+        if bait is not None:
+            lines.append(f"Poco fa {bait.text}. Se qualcuno ti corregge prendine "
+                         "atto senza farne un caso, e non ripeterlo.")
 
         return "QUELLO CHE HAI IN TESTA\n" + "\n".join(lines) if lines else ""
