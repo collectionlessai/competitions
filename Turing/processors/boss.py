@@ -559,8 +559,11 @@ class Boss(torch.nn.Module):
          self.early_chance, self.device_pref) = read_style(self.persona)
         self._empty_conversation()
         self.play.new_room(0.0)
-        self._journal("tattica", nome=self.play.current.name if self.play.current else None,
-                      spinta=self.play.drive, motivo="pescata a inizio stanza", at=0.0)
+        if not self.no_tactics:
+            self._journal("tattica",
+                          nome=self.play.current.name if self.play.current else None,
+                          spinta=self.play.drive,
+                          motivo="pescata a inizio stanza", at=0.0)
         self.bait = None
         self.bait_tries = 0
         self.said_here = 0
@@ -705,7 +708,7 @@ class Boss(torch.nn.Module):
         # question about a talk asked straight after two guests had ignored the
         # same question, because the turn had to be filled and nothing said
         # what for.
-        switched = self.play.reconsider(
+        switched = "" if self.no_tactics else self.play.reconsider(
             self.sense.elapsed, self.sense.still_open(), self.sense.obvious_bots(),
             beat.style in ("dueallavolta", "allea", "sonda"))
         if switched:
@@ -1482,7 +1485,11 @@ class Boss(torch.nn.Module):
 
         last = messages[-1].text if messages else ""
         since = (self.sense.elapsed - self.last_spoke_at) if self.last_spoke_at >= 0 else 999.0
-        self.director.drive = self.play.drive
+        # With tactics off the drawn tactic must not reach the director either:
+        # `drive` multiplies the chance of speaking, so an A/B that only blanks
+        # the prompt block still has one arm made talkative or quiet by a
+        # tactic it never sees. 0.6 is the neutral value a tactic defaults to.
+        self.director.drive = 0.6 if self.no_tactics else self.play.drive
         beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
 
         if not beat.speak:
