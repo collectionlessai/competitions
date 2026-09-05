@@ -449,6 +449,9 @@ class Boss(torch.nn.Module):
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
         self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
+        # Survives the door on purpose: the same question asked in every room
+        # is a signature, and everything else here is cleared at the threshold.
+        self.across_rooms: list[str] = []
         self.entry_due = False                    # a hello is owed, once per room
         self.entry_at = 0.0                       # and when it is due
         self.last_greeted = -99.0                 # so hellos are not traded all night
@@ -576,7 +579,10 @@ class Boss(torch.nn.Module):
         self.room_count += 1
         self._journal("room", me=self.sense.my_name,
                       roster=list(self.sense.heard), persona=self.persona[:120])
-        self.recent_openers = []
+        # `recent_openers` deliberately kept: it is what stops every room from
+        # opening the same way, and clearing it here is why "ciao gente" was
+        # the first two words of ten separate messages.
+        self.recent_openers = self.recent_openers[-8:]
         self.recent_mine = []
 
         # Say hello without asking anybody's permission. The room is at its
@@ -941,6 +947,13 @@ class Boss(torch.nn.Module):
         # Somebody asking us directly is not us going on about it, so staying
         # on a subject we raised is only a fault when nobody asked
         asked_us = "?" in last_text and (self.sense.my_name or "").lower() in last_text.lower()
+        recycled = humanise.repeats_phrasing(reply, self.across_rooms)
+        if recycled and not asked_us:
+            self._journal("dropped", text=reply, why=f"gia detta: {recycled}")
+            if TRACE:
+                print(f"[boss--] gia detta {recycled!r}", flush=True)
+            return ""
+
         if not asked_us and humanise.repeats_self(reply, self.recent_mine[-2:]):
             self._journal("dropped", text=reply, why="ripetizione")
             if TRACE:
@@ -1454,11 +1467,13 @@ class Boss(torch.nn.Module):
                 and self.director.said == 0
                 and self.sense.elapsed - self.last_greeted > 25.0):
             self.last_greeted = self.sense.elapsed
-            line = random.choice([h for h in self.hellos if h not in self.recent_mine]
-                                 or self.hellos)
+            fresh = [h for h in self.hellos
+                     if h not in self.recent_mine and h not in self.across_rooms]
+            line = random.choice(fresh or self.hellos)
             self.entry_due = False        # that was the hello
             self.conv.remember(line)
             self.recent_mine = (self.recent_mine + [line])[-3:]
+            self.across_rooms = (self.across_rooms + [line])[-25:]
             self.sense.i_spoke()
             self.director.spoke()
             self.last_spoke_at = self.sense.elapsed
@@ -1553,6 +1568,7 @@ class Boss(torch.nn.Module):
         self.conv.remember(reply)
         self._note_opener(reply)
         self.recent_mine = (self.recent_mine + [reply])[-3:]
+        self.across_rooms = (self.across_rooms + [reply])[-25:]
         self._note_pace(len(reply))
         self._note_pad(reply, beat)
         self._journal_pad()

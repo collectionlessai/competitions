@@ -524,6 +524,45 @@ _FILLER = {
 }
 
 
+# The same question, room after room. Measured over 403 of our own messages:
+# "il talk di stamattina" 12 times, "hai visto il talk" 10, "visto il talk di"
+# 9, "com'era il talk di" 7 — one message in twelve is the same sentence with
+# the furniture moved. `repeats_self` cannot see it because it is cleared at
+# every door, and a guest whose opening question is always the same is
+# recognisable across rooms no matter which name he is wearing.
+#
+# Deliberately about wording, not subject. A conference guest may talk about
+# talks all evening; what he may not do is ask about them in the same seven
+# words every time. A shared run of four words is that, and "com'era la
+# sessione sui proverbi" collides with none of the above.
+FILLER_RUN = frozenset(("che", "ne", "pensi", "come", "va", "ciao", "ehi", "poi",
+                        "un", "una", "il", "lo", "la", "di", "a", "e", "ma"))
+
+
+def repeats_phrasing(text: str, earlier, run: int = 4) -> str:
+    """A run of `run` words this line shares with anything said earlier.
+
+    Returns the repeated run, so the journal can say what was recycled.
+    """
+    def runs(line):
+        words = re.findall(r"[a-zà-ÿ']+", line.lower())
+        out = set()
+        for i in range(len(words) - run + 1):
+            piece = words[i:i + run]
+            if not all(w in FILLER_RUN for w in piece):
+                out.add(" ".join(piece))
+        return out
+
+    mine = runs(text)
+    if not mine:
+        return ""
+    for old in earlier:
+        shared = mine & runs(old)
+        if shared:
+            return sorted(shared)[0]
+    return ""
+
+
 def repeats_self(text: str, mine, need: int = 2) -> bool:
     """Whether this raises a subject we have just finished raising.
 
