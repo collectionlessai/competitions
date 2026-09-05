@@ -1108,8 +1108,14 @@ class Boss(torch.nn.Module):
         if marked:
             line = marked[-1]
             return line if line.lower().startswith(name.lower()) else f"{name}: {line}"
-        tail = [ln.strip() for ln in (answer or "").splitlines() if ln.strip()]
-        return f"{name}: {tail[-1]}" if tail else ""
+        # No label at all — the answer was cut off, or it wandered. There used
+        # to be a fallback here that took the last line of whatever came back
+        # and handed it to the vote under this guest's name. Measured live, an
+        # analysis that got truncated to "Nia: " became a vote FOR Nia as a
+        # person: an unlabelled sentence reads as favourable to a voter that
+        # is looking for people. Saying nothing about a guest is the honest
+        # state, and the vote already knows that unknown is not human.
+        return ""
 
     def _vote(self) -> str:
         """Name the guests that were people. Cached: asked twice, answered the same."""
