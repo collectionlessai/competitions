@@ -445,6 +445,7 @@ class Boss(torch.nn.Module):
         self.no_baits = os.environ.get("BOSS_NO_BAITS", "") == "1"
         self.bait = None                # the one planted here, once said
         self.bait_tries = 0             # how often we tried to place it
+        self.bait_this_turn = False     # this message is the one carrying it
         self.said_here = 0              # our own turns in this room
         self.last_readings: dict = {}   # so only real movement is written down
         self.node_name = os.environ.get("BOSS_NODE", "boss")
@@ -566,6 +567,7 @@ class Boss(torch.nn.Module):
                           motivo="pescata a inizio stanza", at=0.0)
         self.bait = None
         self.bait_tries = 0
+        self.bait_this_turn = False
         self.said_here = 0
         self.last_readings = {}
         self.pad.clear()
@@ -786,6 +788,7 @@ class Boss(torch.nn.Module):
         if bait is None:
             return None
         self.bait = bait
+        self.bait_this_turn = True
         bait.at = self.sense.elapsed
         self.pad.add("bait", f"hai detto che {bait.say}, che non è vero", ttl=240.0)
         self._journal("bait", say=bait.say, truth=bait.truth, at=round(bait.at, 1))
@@ -1536,10 +1539,15 @@ class Boss(torch.nn.Module):
         self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
                       settled=self.sense.obvious_bots(), open=self.sense.still_open(),
                       pace=round(self.sense.pace, 1),
+                      # The bait replaces the beat it was going to be, so the
+                      # style recorded here is the one the director picked
+                      # before it. Say plainly that this turn carried it.
+                      esca=self.bait_this_turn,
                       tattica=(None if self.no_tactics or not self.play.current
                                else self.play.current.name),
                       punteggi={n: [round(h, 2), round(b, 2)]
                                 for n, (h, b) in self.sense.readings().items()})
+        self.bait_this_turn = False
         self.conv.remember(reply)
         self._note_opener(reply)
         self.recent_mine = (self.recent_mine + [reply])[-3:]
