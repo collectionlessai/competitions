@@ -533,13 +533,18 @@ _FILLER = {
 #
 # Deliberately about wording, not subject. A conference guest may talk about
 # talks all evening; what he may not do is ask about them in the same seven
-# words every time. A shared run of four words is that, and "com'era la
-# sessione sui proverbi" collides with none of the above.
+# words every time.
+#
+# Five words, picked by backtest over 405 of our own messages. Four blocks
+# 5.2% but eats proper nouns: "a palazzo dei normanni" and "il talk di
+# guerini" are the venue and a real speaker, and both may recur. Six blocks
+# 0.5% and lets the formula through. Five blocks 1.7%, and what it blocks is
+# "hai visto il talk di" and "com'era il talk di stamattina".
 FILLER_RUN = frozenset(("che", "ne", "pensi", "come", "va", "ciao", "ehi", "poi",
                         "un", "una", "il", "lo", "la", "di", "a", "e", "ma"))
 
 
-def repeats_phrasing(text: str, earlier, run: int = 4) -> str:
+def repeats_phrasing(text: str, earlier, run: int = 5) -> str:
     """A run of `run` words this line shares with anything said earlier.
 
     Returns the repeated run, so the journal can say what was recycled.
