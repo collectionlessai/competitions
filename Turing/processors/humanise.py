@@ -733,9 +733,28 @@ TRADUZIONI = (
 
 
 def repair_english(text: str) -> str:
-    """Put back the Italian word the model swapped for an English one."""
+    """Put back the Italian word the model swapped for an English one.
+
+    Not translation — a closed list of five words with one Italian
+    equivalent each, no matter the sentence around them. Anything whose
+    Italian depends on context stays out: "actually" is the example, since
+    the obvious "attualmente" means "currently" and the right word is "in
+    realtà". Those are detected and the message dropped, never rewritten.
+
+    A Title Cased word after another Title Cased word is left alone: that
+    is a quoted English title, not a slip, and "Attention Is All You Need
+    Today" should not come back with "oggi" on the end.
+    """
+    def swap(match, italian):
+        before = text[:match.start()].rstrip()
+        previous = before.split()[-1] if before.split() else ""
+        if match.group(0)[:1].isupper() and previous[:1].isupper():
+            return match.group(0)
+        return italian
+
     for english, italian in TRADUZIONI:
-        text = re.sub(r"\b" + re.escape(english) + r"\b", italian,
+        text = re.sub(r"\b" + re.escape(english) + r"\b",
+                      lambda m, it=italian: swap(m, it),
                       text, flags=re.IGNORECASE)
     return text
 
