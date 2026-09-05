@@ -17,6 +17,7 @@ import glob
 import html
 import json
 import os
+import re
 import sys
 
 KINDS_SHOWN = ("room", "tattica", "heard", "said", "punteggi", "pad",
@@ -68,7 +69,13 @@ def scores_table(scores: dict) -> str:
     return '<div class="scores">' + "".join(cells) + "</div>"
 
 
-def render_event(event, zero: float) -> str:
+def render_event(event, zero: float, tactics: bool = True, bait_words=frozenset()) -> str:
+    """One row. `tactics` is False for an agent running without them, whose
+
+    `said` events still carry the drawn-but-unused tactic in older journals;
+    `bait_words` lets a bait-carrying message be marked in runs recorded
+    before the flag for it existed.
+    """
     kind = event.get("kind")
     stamp = f'<span class="ts">{when(event, zero)}</span>'
 
@@ -88,14 +95,17 @@ def render_event(event, zero: float) -> str:
         extra = []
         if event.get("style"):
             extra.append(f'stile <b>{esc(event["style"])}</b>')
-        if event.get("tattica"):
+        if tactics and event.get("tattica"):
             extra.append(f'tattica <b>{esc(event["tattica"])}</b>')
         if event.get("gen") is not None:
             extra.append(f'generato in {event["gen"]}s')
         meta = f'<div class="meta">{" &middot; ".join(extra)}</div>' if extra else ""
-        return (f'<div class="ev said">{stamp}'
+        words = set(re.findall(r"[a-zà-ÿ']+", (event.get("text") or "").lower()))
+        carried = event.get("esca") or len(words & bait_words) >= 2
+        tag = ' <span class="baittag">esca</span>' if carried else ""
+        return (f'<div class="ev said{" carries" if carried else ""}">{stamp}'
                 f'<span class="what">noi</span>'
-                f'<span class="body">{esc(event.get("text"))}{meta}</span></div>')
+                f'<span class="body">{esc(event.get("text"))}{tag}{meta}</span></div>')
 
     if kind == "punteggi":
         return (f'<div class="ev punteggi">{stamp}'
@@ -167,7 +177,12 @@ def render_room(agent: str, room: dict, index: int) -> str:
     roster = ", ".join(head.get("roster") or []) or "(nessuno ancora)"
 
     events = [e for e in room["events"] if e.get("kind") in KINDS_SHOWN]
-    body = "".join(render_event(e, zero) for e in events)
+    tactics = any(e.get("kind") == "tattica" for e in room["events"])
+    bait_words = set()
+    for e in room["events"]:
+        if e.get("kind") == "bait":
+            bait_words |= set(re.findall(r"[a-zà-ÿ']+", (e.get("say") or "").lower()))
+    body = "".join(render_event(e, zero, tactics, bait_words) for e in events)
 
     return f'''
 <section class="room">
@@ -227,6 +242,8 @@ p{margin:0 0 1em;max-width:66ch}
 .body{min-width:0;font-size:.93rem;overflow-wrap:anywhere}
 .meta{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-top:.25em}
 .ev.said{background:var(--us-soft);border-left-color:var(--us)}
+.ev.said.carries{border-left-color:var(--bait)}
+.baittag{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--bait);background:var(--bait-soft);border:1px solid var(--bait);border-radius:2px;padding:1px 5px;margin-left:7px}
 .ev.said .what,.ev.said .body{color:var(--ink)}
 .ev.heard .body{color:var(--muted)}
 .ev.tattica{background:var(--sunk)}
