@@ -446,6 +446,7 @@ class Boss(torch.nn.Module):
         self.bait = None                # the one planted here, once said
         self.bait_tries = 0             # how often we tried to place it
         self.said_here = 0              # our own turns in this room
+        self.last_readings: dict = {}   # so only real movement is written down
         self.node_name = os.environ.get("BOSS_NODE", "boss")
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
@@ -558,9 +559,12 @@ class Boss(torch.nn.Module):
          self.early_chance, self.device_pref) = read_style(self.persona)
         self._empty_conversation()
         self.play.new_room(0.0)
+        self._journal("tattica", nome=self.play.current.name if self.play.current else None,
+                      spinta=self.play.drive, motivo="pescata a inizio stanza", at=0.0)
         self.bait = None
         self.bait_tries = 0
         self.said_here = 0
+        self.last_readings = {}
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -704,8 +708,11 @@ class Boss(torch.nn.Module):
         switched = self.play.reconsider(
             self.sense.elapsed, self.sense.still_open(), self.sense.obvious_bots(),
             beat.style in ("dueallavolta", "allea", "sonda"))
-        if switched and TRACE:
-            print(f"[boss~tattica] passo a {switched}", flush=True)
+        if switched:
+            self._journal("tattica", nome=switched, spinta=self.play.drive,
+                          motivo="cambiata in corsa", at=round(self.sense.elapsed, 1))
+            if TRACE:
+                print(f"[boss~tattica] passo a {switched}", flush=True)
 
         tactic = "" if self.no_tactics else self.play.block()
         if tactic:
@@ -815,6 +822,27 @@ class Boss(torch.nn.Module):
     # conversational competence, which is the cheapest thing an LLM produces.
     # What replaces it is the analyst asking the opposite question, once, at
     # vote time — see `INTERACTION_SYSTEM`.
+
+    def _journal_scores(self) -> None:
+        """The two scores per guest, whenever one of them has really moved.
+
+        They used to be written once, at vote time, which shows where the
+        room ended up and nothing about how it got there. A verdict is only
+        readable next to the reading that produced it, so this records the
+        moments they change rather than the final snapshot.
+        """
+        now = {n: (round(h, 2), round(b, 2))
+               for n, (h, b) in self.sense.readings().items()}
+        moved = {n: v for n, v in now.items()
+                 if n not in self.last_readings
+                 or abs(v[0] - self.last_readings[n][0]) >= 0.08
+                 or abs(v[1] - self.last_readings[n][1]) >= 0.08}
+        if not moved:
+            return
+        self.last_readings = now
+        self._journal("punteggi", cambiati={n: list(v) for n, v in moved.items()},
+                      tutti={n: list(v) for n, v in now.items()},
+                      at=round(self.sense.elapsed, 1))
 
     def _journal_pad(self) -> None:
         live = [{"kind": n.kind, "text": n.text, "about": n.about}
@@ -1347,6 +1375,7 @@ class Boss(torch.nn.Module):
         for line in turn.lines:
             if line.speaker and not line.mine:
                 self._journal("heard", speaker=line.speaker, text=line.text[:400])
+        self._journal_scores()
 
         if turn.kind == "start":
             self._new_room()
@@ -1499,7 +1528,10 @@ class Boss(torch.nn.Module):
         self.said_here += 1
         self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
                       settled=self.sense.obvious_bots(), open=self.sense.still_open(),
-                      pace=round(self.sense.pace, 1))
+                      pace=round(self.sense.pace, 1),
+                      tattica=self.play.current.name if self.play.current else None,
+                      punteggi={n: [round(h, 2), round(b, 2)]
+                                for n, (h, b) in self.sense.readings().items()})
         self.conv.remember(reply)
         self._note_opener(reply)
         self.recent_mine = (self.recent_mine + [reply])[-3:]
