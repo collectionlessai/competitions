@@ -21,6 +21,7 @@ caller's business — `director.py` sets it per turn.
 
 import os
 import re
+import unicodedata
 import pathlib
 import random
 
@@ -587,6 +588,71 @@ INGLESE = re.compile(
     r"\b(?:inside|instead|however|actually|maybe|because|really|although|"
     r"therefore|besides|whereas|somehow|anyway|indeed|regarding|"
     r"people|things|everyone|something|nothing|always|never)\b", re.IGNORECASE)
+
+
+# Content invented about the conference. Harder than the invented token above,
+# because it is plausible Italian: seen live as "mi mancano le cose del
+# professor Rossi" and "la sessione sul parsing automatico" — a person and a
+# session that do not exist. The old INVENTED regex only caught letter-digit
+# mash like "prover0bi" and went straight past both.
+#
+# It matters more than it looks. Our own analyst is told that a wrong fact is
+# the strongest single thing you can hold against somebody, so a hallucinated
+# speaker is us handing the room the best evidence it will get all night.
+#
+# The test is deliberately permissive: reject only what has NO support at all
+# in the knowledge base. One known word anywhere in the phrase is enough to
+# keep it, because the cost of dropping a good message is a lost turn and the
+# cost of keeping a bad one is the room.
+def _stem(word: str) -> str:
+    """Same six-character folded prefix `context.stem` uses."""
+    folded = unicodedata.normalize('NFKD', word.lower())
+    folded = ''.join(c for c in folded if not unicodedata.combining(c))
+    return folded[:6]
+
+
+PERSONA_CUE = re.compile(
+    r"\b(?:prof\.?|professor(?:e|essa)?|dott\.?(?:oressa)?|"
+    r"(?:talk|keynote|intervento|lavoro|paper|presentazione|articolo|poster)\s+d(?:i|el|ella))"
+    r"\s+(?P<name>[a-zà-ÿ][\w\'-]{2,})", re.IGNORECASE)
+
+TEMA_CUE = re.compile(
+    r"\b(?:sessione|sessioni|talk|tutorial|panel|seminario|workshop|keynote)"
+    r"\s+(?:su|sul|sulla|sui|sugli|sulle|sull\'|dedicat[oa]\s+a)\s*"
+    r"(?P<tema>[\w\'\s à-ÿ]{3,40})", re.IGNORECASE)
+
+# Words that legitimately follow "talk di" without naming anybody.
+NON_NOMI = frozenset((
+    "stamattina", "stamane", "ieri", "oggi", "domani", "prima", "dopo", "poco",
+    "quello", "questo", "quella", "questa", "lui", "lei", "loro", "tutti",
+    "qualcuno", "nessuno", "noi", "voi", "cui", "chiusura", "apertura", "cui",
+    "prova", "ricerca", "gruppo", "sopra", "sotto", "adesso", "ora", "quel",
+    # days and times of day: "il talk di domenica sera" names no one
+    "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato",
+    "domenica", "mattina", "mattino", "pomeriggio", "sera", "serata", "notte",
+))
+
+
+def invents_conference(text: str, known) -> str:
+    """The invented thing this message names, or "" when it names none.
+
+    `known` is `Context.vocabulary()`: stems of every word the knowledge base
+    contains. Returns the offending word so the journal can say what was wrong.
+    """
+    if not known:
+        return ""
+    for found in PERSONA_CUE.finditer(text):
+        name = found.group("name").lower()
+        if name in NON_NOMI or len(name) < 3:
+            continue
+        if _stem(name) not in known:
+            return name
+    for found in TEMA_CUE.finditer(text):
+        parts = [w for w in re.findall(r"[\w']+", found.group("tema").lower())
+                 if len(w) > 3 and w not in NON_NOMI][:3]
+        if parts and not any(_stem(w) in known for w in parts):
+            return " ".join(parts)
+    return ""
 
 
 def has_english(text: str) -> bool:

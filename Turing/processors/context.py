@@ -22,6 +22,18 @@ actually there.
 import os
 import re
 import datetime
+import unicodedata
+
+
+def stem(word: str) -> str:
+    """A crude stem: enough to make "automatico" and "automatica" the same.
+
+    Not linguistics — a six-character prefix with accents folded. It exists
+    only to keep a whitelist from rejecting a word for its ending.
+    """
+    folded = unicodedata.normalize('NFKD', word.lower())
+    folded = ''.join(c for c in folded if not unicodedata.combining(c))
+    return folded[:6]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COMMON_FILE = os.path.join(HERE, "wordlists", "common_it.txt")
@@ -179,6 +191,31 @@ class Context:
         for note in self.notes:
             words |= {w.strip(".,;:!?()'\"").lower() for w in note.split() if len(w) > 4}
         return frozenset(words - _common_words() - frozenset(self.obvious))
+
+    def vocabulary(self) -> frozenset:
+        """Every content word the knowledge base contains, as short stems.
+
+        Used the other way round from `words`: not to spot what a guest
+        knows, but to spot what WE just made up. A message naming a talk,
+        a session or a person with no support anywhere in this file is a
+        hallucination, and by our own rule a wrong fact is the strongest
+        thing anybody can hold against whoever said it.
+        """
+        if getattr(self, "_vocab", None) is None:
+            words = set()
+            for line in self.always:
+                words.update(re.findall(r"[\w']+", line.lower()))
+            words.update(w.lower() for w in self.words)
+            words.update(w.lower() for w in self.obvious)
+            for _name, _rule, lines in self.blocks:
+                for line in lines:
+                    words.update(re.findall(r"[\w']+", line.lower()))
+            for _date, _start, _end, what in self.programme:
+                words.update(re.findall(r"[\w']+", what.lower()))
+            for entry in self.off_hours:
+                words.update(re.findall(r"[\w']+", str(entry).lower()))
+            self._vocab = frozenset(stem(w) for w in words if len(w) > 2)
+        return self._vocab
 
     def block(self, when: datetime.datetime | None = None, said: str = "") -> str:
         """The context for one turn: the core, the clock, and whatever the room

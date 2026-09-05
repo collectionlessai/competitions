@@ -915,6 +915,28 @@ class Boss(torch.nn.Module):
                 print(f"[boss--] parola inventata {reply!r}", flush=True)
             return ""
 
+        # A talk, a session or a speaker that does not exist. Seen live as
+        # "mi mancano le cose del professor Rossi" and "la sessione sul
+        # parsing automatico". This is the worst thing we can say, by our
+        # own analyst's rule: a wrong fact is the strongest evidence there
+        # is against whoever says it, and here we would be handing it over
+        # about ourselves.
+        # The planted bait is a falsehood on purpose, and it names conference
+        # things that are wrong by design. Without this the guard eats it
+        # before it is ever said — measured on the backtest, which flagged
+        # our own "panel sull'etica dell'ia" as invented content.
+        own_bait = False
+        if self.bait is not None:
+            said = set(re.findall(r"\w+", reply.lower()))
+            own_bait = len(said & set(re.findall(r"\w+", self.bait.say.lower()))) >= 2
+        invented = "" if own_bait else humanise.invents_conference(
+            reply, self.context.vocabulary())
+        if invented:
+            self._journal("dropped", text=reply, why=f"inventato: {invented}")
+            if TRACE:
+                print(f"[boss--] inventato {invented!r} in {reply!r}", flush=True)
+            return ""
+
         # English welded into the Italian. Seen in the competition as "chi è chi
         # qui inside" and "in fila per il caffè instead of seguire": nobody types
         # that by accident, and it is the same class of giveaway as the Cyrillic
