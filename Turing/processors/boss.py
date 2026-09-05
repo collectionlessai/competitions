@@ -437,6 +437,7 @@ class Boss(torch.nn.Module):
         # the same rooms with the same guests. Off means the model gets no
         # TATTICA block at all; everything else is untouched.
         self.no_tactics = os.environ.get("BOSS_NO_TACTICS", "") == "1"
+        self.no_baits = os.environ.get("BOSS_NO_BAITS", "") == "1"
         self.bait = None                # the one planted here, once said
         self.bait_tries = 0             # how often we tried to place it
         self.said_here = 0              # our own turns in this room
@@ -748,6 +749,8 @@ class Boss(torch.nn.Module):
         Returns it once. Everything after that reads `self.bait`, which is
         what the analyst is handed at vote time.
         """
+        if self.no_baits:                      # A/B: this agent plants none
+            return None
         if self.bait is not None:              # already placed here
             return None
         if self.said_here < self.BAIT_AFTER_TURNS:
