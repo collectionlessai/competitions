@@ -435,6 +435,7 @@ class Boss(torch.nn.Module):
         self.baits = BaitBox()          # prepared falsehoods, one per room
         self.bait = None                # the one planted here, once said
         self.bait_tries = 0             # how often we tried to place it
+        self.said_here = 0              # our own turns in this room
         self.node_name = os.environ.get("BOSS_NODE", "boss")
         self.room_count = 0
         self.recent_openers: list[str] = []       # so every line does not start the same way
@@ -549,6 +550,7 @@ class Boss(torch.nn.Module):
         self.play.new_room(0.0)
         self.bait = None
         self.bait_tries = 0
+        self.said_here = 0
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -727,9 +729,14 @@ class Boss(torch.nn.Module):
     ABOUT_ME = re.compile(r"\b(?:io )?(?:sono|faccio|lavoro|vengo|abito|studio|"
                           r"stamattina ho|ieri ho|oggi ho|ho appena)\b", re.IGNORECASE)
 
-    # Late enough that the room has warmed up and we have said normal things
-    # first, early enough that somebody still has turns left to answer in.
-    BAIT_FROM, BAIT_UNTIL = 45.0, 165.0
+    # Placed by rhythm, not by clock. Measured over seven rooms, this agent
+    # speaks at about 40 seconds and then goes quiet until past 175 — a
+    # two-minute hole that a fixed 45-165s window fell straight into, and
+    # it planted nothing in twenty turns. Counting our own turns instead
+    # survives whatever the pace turns out to be: the third time we speak
+    # the room is warm and we have said normal things first.
+    BAIT_AFTER_TURNS = 2
+    BAIT_LATEST = 250.0
 
     def _bait_due(self):
         """The prepared falsehood for this room, on the turn it is placed.
@@ -739,13 +746,15 @@ class Boss(torch.nn.Module):
         """
         if self.bait is not None:              # already placed here
             return None
-        if not (self.BAIT_FROM <= self.sense.elapsed <= self.BAIT_UNTIL):
+        if self.said_here < self.BAIT_AFTER_TURNS:
+            return None
+        if self.sense.elapsed > self.BAIT_LATEST:   # nobody left to answer
             return None
         if self.entry_due:                     # still owe the room a hello
             return None
         # Somebody has to be there to swallow it, and we should have spoken
         # normally first so the room is not opened with a lie.
-        if len([n for n in self.sense.heard if self.sense.heard[n]]) < 2:
+        if len(self.sense.heard) < 2:          # nobody to swallow it
             return None
         if self.last_spoke_at < 0:
             return None
@@ -1435,6 +1444,7 @@ class Boss(torch.nn.Module):
             print(f"[boss->] {reply!r}  (style={beat.style}, "
                   f"gen={self.last_call_seconds:.1f}s)", flush=True)
 
+        self.said_here += 1
         self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
                       settled=self.sense.obvious_bots(), open=self.sense.still_open(),
                       pace=round(self.sense.pace, 1))
