@@ -878,7 +878,8 @@ class Boss(torch.nn.Module):
         # The model answered as itself, or never came back to Italian. Nothing
         # to salvage either way: a tidied-up "sono un assistente virtuale" is
         # still an assistant, and half a broken token is worse
-        if humanise.is_assistant(reply) or humanise.looks_broken(reply):
+        if (humanise.is_assistant(reply) or humanise.looks_broken(reply)
+                or humanise.is_flooded(reply)):
             out = humanise.deflect(avoid=self.recent_deflections)
             self.recent_deflections = (self.recent_deflections + [out])[-4:]
             return humanise.safe(out)

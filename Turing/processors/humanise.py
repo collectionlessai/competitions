@@ -337,6 +337,21 @@ FLOOD = re.compile(r"(.)\1{5,}")                       # aaaaaaaa, !!!!!!!!
 NO_VOWEL = re.compile(r"^[^aeiouàèéìòù\s]{9,}$", re.IGNORECASE)
 
 
+# A run the keyboard did not produce. Tuned in two steps on purpose: six of
+# the same punctuation mark is already machine ("rio,!!!!!!!!!!!!!!"), but a
+# person really does type "ahhhhhh" or "nooooo", so letters need a longer run
+# before they count. Measured on our own output, 19.7% of one run and 4.0% of
+# another were messages like this, sent straight into the room — the loudest
+# possible tell, and nothing on the way out was looking for them. `is_junk`
+# catches them arriving; this catches them leaving.
+FLOOD_OUT = re.compile(r"([^\w\s])\1{5,}|(\w)\2{7,}")
+
+
+def is_flooded(text: str) -> bool:
+    """Whether our own line degenerated into a run of one character."""
+    return bool(FLOOD_OUT.search(text))
+
+
 def is_junk(text: str) -> bool:
     """True when an incoming message is noise rather than conversation.
 
