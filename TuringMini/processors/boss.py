@@ -33,7 +33,8 @@ import random
 import torch
 
 from utils import Conversation
-from processors.context import Context
+from processors.findings import Findings
+from processors import lingua
 from processors.room import RoomSense
 from processors.director import Director
 from processors.pad import Pad
@@ -365,17 +366,21 @@ def read_style(block: str) -> tuple:
             float(found.group(4) or 0.0), found.group(5) or "phone")
 
 
-def device_now(preference: str, in_session: bool) -> str:
+def device_now(preference: str, di_giorno: bool) -> str:
     """Which one they are actually holding.
 
-    `pc` or `phone` means always that one. `a/b` means a during sessions and b
-    outside them — and which way round is the persona's business, not a rule:
-    one person keeps the laptop open in talks and writes from bed at night, the
-    next takes notes on paper and only opens it back at the hotel.
+    `pc` or `phone` means always that one. `a/b` means one by day and the
+    other at night — which way round is the persona's business, not a rule:
+    one person works at a desk and texts from bed, the next carries the
+    laptop to a cafe and puts it away at six.
+
+    TuringBoss split this on being in a conference session. The clock is the
+    part of that which survives: what time it is is universal, what is on the
+    programme is not.
     """
     if "/" in preference:
         during, _, outside = preference.partition("/")
-        return during if in_session else outside
+        return during if di_giorno else outside
     return preference if preference in ("pc", "phone") else "phone"
 
 
@@ -428,19 +433,13 @@ class Boss(torch.nn.Module):
 
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
-        self.context = Context()          # the conference, sliced by the clock
-        # Today's sky, over the written one. The line in the file goes stale in
-        # a day — it said 27 and drizzle on a morning that turned out 31 and
-        # clear — and the weather is the one fact every guest can check out of
-        # the window. Fetched here rather than in the launcher so that whoever
-        # starts this does not have to know the agent has a knowledge base at
-        # all. Six seconds at most, and any failure keeps the written line.
-        live = self.context.refresh_weather()
-        if live and TRACE:
-            print(f"[boss] meteo dal vivo: {live}", flush=True)
+        # No weather here. TuringBoss fetched Palermo's because it knew it was
+        # in Palermo; this one has to be told where it is first, and usually
+        # never is. See `findings.py`.
+        self.findings = Findings()
         # No `strong` tier any more: it came from `## NOTE`, and hand-editing
         # the context while the competition runs is not allowed.
-        self.sense = RoomSense(markers=self.context.markers())
+        self.sense = RoomSense()
         self.pad = Pad()                  # what we are holding in mind
         self.director = director or Director()
 
@@ -584,6 +583,7 @@ class Boss(torch.nn.Module):
         self.stalled = False
         self.said_here = 0
         self.last_readings = {}
+        self.findings.clear()
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -668,8 +668,7 @@ class Boss(torch.nn.Module):
     @property
     def device(self) -> str:
         """Phone or laptop, right now."""
-        return device_now(self.device_pref, self.context.during_conference()
-                          and bool(self.context.now_line()))
+        return device_now(self.device_pref, 8 <= datetime.datetime.now().hour < 20)
 
     def _prompt(self, beat) -> str:
         """The turn as one string, since the gateway takes one string.
@@ -685,7 +684,7 @@ class Boss(torch.nn.Module):
         # conversation, and a block whose trigger does not appear in it stays
         # out of the prompt entirely.
         recent = self.conv.transcript(limit=12)
-        parts.append(self.context.block(said=recent))
+        parts.append(self.findings.block())
 
         where = ["LA STANZA",
                  "Sei in una chat con persone che non conosci."]
@@ -827,6 +826,29 @@ class Boss(torch.nn.Module):
     # conversational competence, which is the cheapest thing an LLM produces.
     # What replaces it is the analyst asking the opposite question, once, at
     # vote time — see `INTERACTION_SYSTEM`.
+
+    def _learn_language(self) -> str:
+        """Fill the language slot once the room has said enough to tell.
+
+        The cheapest of the four slots and the only one that needs no model
+        call: function words settle it, and they arrive on their own. It also
+        has to be first, because the check for a guest writing in some other
+        language is meaningless until we know which one is ours.
+        """
+        if self.findings.get("lingua"):
+            return ""
+        detti = [m for name in self.sense.heard
+                 for m in self.sense.speakers[name].msgs]
+        trovata = lingua.della_stanza(detti)
+        if not trovata:
+            return ""
+        ultimo = detti[-1] if detti else ""
+        self.findings.note("lingua", trovata, ultimo[:80], "la stanza",
+                           round(self.sense.elapsed, 1))
+        self._journal("capito", casella="lingua", valore=trovata)
+        if TRACE:
+            print(f"[boss~capito] la stanza parla {trovata}", flush=True)
+        return trovata
 
     def _journal_scores(self) -> None:
         """The two scores per guest, whenever one of them has really moved.
@@ -1211,7 +1233,7 @@ class Boss(torch.nn.Module):
         for name in candidates:
             human, bot = readings.get(name, (0.0, 0.0))
             others = [n for n in candidates if n != name] or ["nessun altro"]
-            ask = (f"{self.context.block(said=transcript)}\n\n"
+            ask = (f"{self.findings.block()}\n\n"
                    f"DEVI GIUDICARE SOLTANTO: {name}\n"
                    f"Gli altri presenti, che NON devi giudicare ma che servono a "
                    f"capire come {name} si è comportato con loro: {', '.join(others)}\n\n"
@@ -1244,7 +1266,7 @@ class Boss(torch.nn.Module):
         # other direction: it made the place the whole test, which a prepared
         # model passes and a distracted person fails. This one names the section
         # for what it holds and leaves the weighing to `VOTE_SYSTEM`.
-        prompt = (f"{self.context.block(said=transcript)}\n\n"
+        prompt = (f"{self.findings.block()}\n\n"
                   f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
                   f"TRASCRIZIONE\n{transcript}\n\n"
                   + (f"COSA HA MOSTRATO CIASCUNO\n{interactions}\n\n"
@@ -1367,6 +1389,7 @@ class Boss(torch.nn.Module):
         for line in turn.lines:
             if line.speaker and not line.mine:
                 self._journal("heard", speaker=line.speaker, text=line.text[:400])
+        self._learn_language()
         self._journal_scores()
 
         if turn.kind == "vote":

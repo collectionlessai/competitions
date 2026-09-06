@@ -255,13 +255,12 @@ class Speaker:
 
         # -- evidence that it is a person ---------------------------------
 
-        # Knowing something about this place and week. Distinct words only, so
-        # repeating "Palermo" a hundred times buys exactly one; the broad words
-        # are not on the list at all. Saturates, so nobody recites a gazetteer.
-        if markers and f["count"] >= 3:
-            said = " ".join(self.msgs).lower()
-            seen = {w for w in markers if _said(said, w)}
-            human_terms.append(0.65 * min(1.0, len(seen) / 2.0))
+        # The term that used to sit here rewarded knowing words specific to
+        # this place and this week, and it is the first thing to go in an
+        # agent that is not supposed to know where it is. Measured before
+        # removing it: on 244 readings the human axis kept the same median
+        # (0.14) and the same share of guests we stop listening to (14.8%).
+        # It only ever moved the ceiling, from 0.83 to 0.64.
 
         # Writing like a thumb rather than a keyboard: at least one genuinely
         # short message, no capitals, no closing punctuation.
