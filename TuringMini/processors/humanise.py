@@ -1,0 +1,848 @@
+"""Turning a model's answer into something a person typed.
+
+A system prompt gets you most of the way and then stops working, because the
+things that give a model away are the things it does without deciding to: the
+capital letter at the start, the full stop at the end, the answer that covers
+every point that was raised, the sentence that begins "Certamente!". They
+survive any amount of "scrivi come una persona" because they were never a
+choice.
+
+So they come off here, after the fact, where they are a string operation rather
+than a request. Nothing in this file is about content: the model decides what to
+say and this decides how it looks on a phone screen.
+
+The typos are the part worth being careful with. A typo in every message is as
+recognisable as none at all, and a typo that no keyboard could produce is worse
+than either, so there are five kinds here and they are all things that happen
+when a real thumb misses: two letters swapped, a double consonant typed once, an
+accent dropped, an apostrophe skipped, a neighbouring key hit. Rate is the
+caller's business — `director.py` sets it per turn.
+"""
+
+import os
+import re
+import unicodedata
+import pathlib
+import random
+
+# Reasoning traces. Some models emit one around the answer, and an agent that
+# posts its own deliberation into a room about who is a machine has answered the
+# question. The half-open form catches a trace whose opening tag was cut off by
+# the token ceiling, which is the common way it arrives
+THINK = re.compile(r"<(think|thought|reasoning|analysis)>.*?</\1>", re.IGNORECASE | re.DOTALL)
+THINK_OPEN = re.compile(r"^.*?</(?:think|thought|reasoning|analysis)>", re.IGNORECASE | re.DOTALL)
+# Where a runaway generation stops being our message: a chat-template marker, or
+# the header of the turn the model started writing for somebody else
+CUT = re.compile(r"<\|[a-z_]+\|>|</s>|\[/?INST\]|\[/?SYS\]|<\|endoftext\|>|"
+                 r"\n\s*(?:user|assistant|system)\s*\n", re.IGNORECASE)
+SPEAKER_TURN = re.compile(r"^\s*(?:\*\*)?[A-Za-zÀ-ÿ][\w'\-]{0,20}(?:\*\*)?\s*:\s+\S")
+TAGS = re.compile(r"<[^>]{1,20}>")
+BULLET = re.compile(r"^\s*(?:[-*•·]|\d+[.)])\s+", re.MULTILINE)
+MARKDOWN = re.compile(r"[*_`#>]+")
+LABEL = re.compile(r"^\s*(?:\*\*)?[A-Za-zÀ-ÿ][\w'\-]{0,20}(?:\*\*)?\s*:\s*")
+EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
+URL = re.compile(r"https?://\S+|www\.\S+")
+MAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.\w{2,}\b")
+PHONE = re.compile(r"\b(?:\+39\s?)?3\d{2}[\s.-]?\d{6,7}\b")
+
+# The words the room would asterisk, taken from the world's own lists rather
+# than guessed. A hand-written regex covered 172 of the 976 Italian entries and
+# missed "culo", which `Qwen2.5-72B` used naturally — "congelarmi il culo" would
+# have been broadcast as "congelarmi il ***". As the world's own test file puts
+# it, "a masked word makes a human guest look like a censored bot".
+#
+# The slur lists are here too, and they matter more: those are the ones that
+# earn strikes, and five strikes puts the guest off the floor entirely.
+#
+# Copied from `unaiverse-examples/worlds/turing_ita/src/wordlists/` so the entry
+# stands alone. Refresh them if the world's lists move on.
+WORDLISTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlists")
+
+
+def _load_masked_words() -> frozenset:
+    words: set[str] = set()
+    for name in ("profanity_it.txt", "profanity_en.txt", "slurs_it.txt", "slurs_en.txt"):
+        path = os.path.join(WORDLISTS, name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                entry = line.strip().lower().rstrip("*")
+                if entry and not entry.startswith("#"):
+                    words.add(entry)
+    return frozenset(words)
+
+
+MASKED_WORDS = _load_masked_words()
+TOKEN = re.compile(r"[A-Za-zÀ-ÿ']+")
+
+# What the world's own filter would mask, which is a bigger tell than anything
+# it could have masked: everybody else sees your message full of asterisks
+MASKABLE = (URL, MAIL, PHONE)
+
+# The model breaking character. Not a style problem, a whole-message problem:
+# when one of these matches, the message is thrown away rather than tidied up.
+ASSISTANT = re.compile(
+    r"come posso aiutart|posso aiutart|sono (?:un|una|un')\s*(?:intelligenz|assistent|model|"
+    r"chatbot|programm|software|\bia\b)|in quanto (?:model|assistent|\bia\b)|"
+    r"come model(?:lo)? linguistic|non ho (?:emozioni|un corpo|sentimenti|preferenze|"
+    r"esperienze person)|spero (?:che (?:questo|ciò) )?(?:ti sia|di esserti) util|"
+    r"sono qui per aiutart|ecco (?:una|un) (?:list|elenc)|in (?:conclusione|sintesi)|"
+    r"riassumendo|fammi sapere se|se hai (?:altre )?domande|certamente!|assolutamente!",
+    re.IGNORECASE)
+
+# What goes out instead. Somebody who was asked something odd and is not playing
+DEFLECTIONS = (
+    "boh", "in che senso scusa", "eh?", "mah", "che domanda è", "ok e allora",
+    "non ho capito", "aspe cosa", "vabbè", "sì ok", "e chi se ne frega",
+)
+
+# QWERTY, the Italian layout, only the neighbours a thumb actually catches
+NEIGHBOURS = {
+    "a": "sq", "b": "vn", "c": "xv", "d": "sf", "e": "wr", "f": "dg", "g": "fh",
+    "h": "gj", "i": "uo", "j": "hk", "k": "jl", "l": "k", "m": "n", "n": "bm",
+    "o": "ip", "p": "o", "q": "wa", "r": "et", "s": "ad", "t": "ry", "u": "yi",
+    "v": "cb", "w": "qe", "x": "zc", "y": "tu", "z": "x",
+}
+ACCENTS = str.maketrans("àèéìòùÀÈÉÌÒÙ", "aeeiouAEEIOU")
+ALPHABET = "abcdefghilmnopqrstuvz"
+# Share of fat-finger slips that land on a key nowhere near the intended one
+WILD_KEY = 0.15
+
+
+def cut_runaway(text: str) -> str:
+    """Keep only the model's own first turn.
+
+    A model whose end-of-turn token is not honoured as a stop sequence does not
+    stop: it emits the token as text and carries straight on, writing the *other*
+    guest's next line for them. Observed on the first live call of this entry —
+    `ciao ivy, come mai? <|im_end|><|im_start|>user\\nsono stressato per...` —
+    and posting that into the room is worse than saying nothing, because it puts
+    words in somebody else's mouth under our name.
+
+    Stop sequences are set on the backend too. This is the half that does not
+    depend on the model honouring them.
+    """
+    cut = CUT.search(text)
+    if cut:
+        text = text[:cut.start()]
+
+    # A second speaker's turn, written as a chat line, after we already have one
+    lines = [line for line in text.splitlines() if line.strip()]
+    for index, line in enumerate(lines[1:], start=1):
+        if SPEAKER_TURN.match(line):
+            lines = lines[:index]
+            break
+    return "\n".join(lines)
+
+
+def strip_noise(text: str) -> str:
+    """Everything the room would never see a person type."""
+    text = cut_runaway(text)
+    text = THINK.sub(" ", text)
+    text = THINK_OPEN.sub(" ", text)
+    text = TAGS.sub(" ", text)
+    text = BULLET.sub("", text)
+    text = MARKDOWN.sub("", text)
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"\s{2,}", " ", text).strip()
+
+    # A model that was told to write only the message sometimes writes the label too
+    if LABEL.match(text) and not text.lower().startswith(("ma ", "no ", "sì ", "si ")):
+        text = LABEL.sub("", text, count=1)
+
+    return text.strip(" \"'“”«»").strip()
+
+
+def drop_maskable(text: str) -> str:
+    """Take out what the world's message filter would asterisk.
+
+    The last resort, used when asking the model again did not help: losing a
+    word beats broadcasting a line full of asterisks.
+    """
+    for pattern in MASKABLE:
+        text = pattern.sub("", text)
+    if MASKED_WORDS:
+        text = TOKEN.sub(lambda m: "" if m.group(0).lower() in MASKED_WORDS else m.group(0), text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def cap_emoji(text: str, keep_chance: float = 0.2) -> str:
+    """At most one emoji, and usually none. Models put one in every line."""
+    found = EMOJI.findall(text)
+    if not found:
+        return text
+    text = EMOJI.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    if random.random() < keep_chance:
+        text = f"{text} {found[0]}"
+    return text
+
+
+# Words a sentence cannot end on. Cutting after one of them does not read as
+# somebody trailing off, it reads as a string that was cut: "io sono ROY in"
+DANGLING = {
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "del", "dei", "della",
+    "di", "a", "da", "in", "con", "su", "per", "tra", "fra", "al", "alla", "allo",
+    "e", "ed", "o", "ma", "che", "se", "come", "quando", "mentre", "perché",
+    "non", "più", "molto", "anche", "mi", "ti", "ci", "vi", "si", "ne", "è",
+    "io", "tu",
+}
+
+
+# Openers that carry no content on their own. Cutting at the comma after one
+# of these keeps the throat-clearing and throws away the sentence: seen live
+# as "beh, se proprio vogliamo essere sinceri" and "ehm, a meno che non mi
+# sbagli", which say nothing and read as a message that broke.
+PREAMBOLO = re.compile(
+    r"^\s*(?:beh|boh|ehm|mah|allora|senti|senta|sentite|cio[eè]|insomma|"
+    r"guarda|guardate|dai|va beh|vabb[eè]|niente|comunque|per[oò]|"
+    r"se\b|quando\b|mentre\b|anche se|dato che|visto che|a meno che|"
+    r"nel caso|magari|forse|secondo me|a dire il vero|per essere onesti)",
+    re.IGNORECASE)
+
+
+def _is_preamble(head: str) -> bool:
+    """Whether this fragment is throat-clearing rather than a thought."""
+    return bool(PREAMBOLO.match(head))
+
+
+def cap_words(text: str, limit: int) -> str:
+    """Cut to `limit` words, but only where the cut leaves a whole thought.
+
+    A message that stops mid-clause is far more suspicious than a long one.
+    Seen live, answering a person who had just asked how the day was going:
+
+        "caldo, sì. io ho fatto"
+
+    which is not brevity, it is damage — and it was the half that got cut that
+    carried the content. So the ceiling is a preference, not a guarantee: cut at
+    a sentence end, else at a comma, and if neither exists inside the budget,
+    send the whole thing. `max_tokens` on the backend is the real ceiling.
+    """
+    words = text.split()
+    if len(words) <= limit:
+        return text
+
+    cut = " ".join(words[:limit])
+    for mark in (". ", "! ", "? "):
+        if mark in cut:
+            head = cut.rsplit(mark, 1)[0] + mark.strip()
+            if len(head.split()) >= 3:
+                return head
+    if ", " in cut:
+        head = cut.rsplit(", ", 1)[0]
+        if (len(head.split()) >= max(4, limit // 2)
+                and not _is_preamble(head)):
+            return head
+
+    # Nowhere clean to stop: let it run rather than amputate it
+    return text
+
+
+# Words nothing can follow them from. Split in two on evidence: a preposition
+# or an article really cannot end a sentence, ever. A participle or an
+# auxiliary can — "ma quanti doppi sensi hai fatto?" and "ma tu di dove sei?"
+# are complete questions, and the first version of this flagged both. So those
+# only count when the line carries no closing mark at all, which is what
+# "allora, qualcuno ha visto" looks like.
+MOZZATO_SEMPRE = re.compile(
+    r"(?<![\'’])\b(?:di|da|in|con|su|per|tra|fra|il|lo|la|gli|le|un|uno|una|"
+    r"del|dello|della|dei|degli|delle|al|allo|alla|ai|agli|alle|nel|nella|"
+    r"e|o|ma|che|cui|come)\s*$", re.IGNORECASE)
+MOZZATO_SENZA_PUNTO = re.compile(
+    r"(?<![\'’])\b(?:visto|fatto|detto|preso|messo|dato|"
+    r"ho|hai|abbiamo|avete|hanno|sono|siamo|siete)\s*$", re.IGNORECASE)
+
+
+def ends_mid_sentence(text: str) -> bool:
+    """Whether the line stops on a word nothing can follow it from."""
+    body = text.strip()
+    if len(body.split()) < 3:
+        return False
+    if MOZZATO_SEMPRE.search(body.rstrip("?!.…")):
+        return True
+    # No closing mark of any kind: the generation ran out rather than ended.
+    if body[-1:] in "?!.…":
+        return False
+    return bool(MOZZATO_SENZA_PUNTO.search(body))
+
+
+def chat_case(text: str, lower_chance: float = 0.65, stop_chance: float = 0.2) -> str:
+    """Lower case at the start, no full stop at the end. Questions keep their mark.
+
+    Raises the initial on the other side of the coin, which is the half that
+    was missing. The system prompt says "tutto minuscolo" and the model obeys
+    it 98% of the time, so `lower_chance` never had anything to do: measured
+    over 58 rooms, our median was 100% lowercase and 98% of rooms sat above
+    80%. Perfect obedience is itself the tell — a person on a phone writes
+    mostly lowercase, not always, because sometimes the keyboard capitalises
+    for them and they do not go back. So the coin now falls both ways.
+    """
+    if not text:
+        return text
+    if not text[:1].isdigit():
+        # The capital is a slip, not a coin toss: capped at one message in
+        # five however low `lower_chance` goes. The guests we are hiding among
+        # start 71% of their messages with a capital, so landing near half
+        # would be trading one signature for theirs.
+        capitalise = min(0.2, 1.0 - lower_chance)
+        roll = random.random()
+        if roll < lower_chance:
+            text = text[0].lower() + text[1:]
+        elif roll < lower_chance + capitalise and text[:1].islower():
+            text = text[0].upper() + text[1:]
+    if text.endswith(".") and not text.endswith("...") and random.random() > stop_chance:
+        text = text[:-1]
+    return text
+
+
+def _typo_word(word: str) -> str:
+    """One plausible slip on one word, or the word back if none applies."""
+    if len(word) < 4:
+        return word
+    kinds = ["swap", "neighbour", "drop", "double"]
+    if re.search(r"(.)\1", word):
+        kinds.append("single")
+    if any(c in word for c in "àèéìòù"):
+        kinds.append("accent")
+    if "'" in word:
+        kinds.append("apostrophe")
+
+    kind = random.choice(kinds)
+    i = random.randrange(1, len(word) - 1)
+
+    if kind == "swap":
+        return word[:i] + word[i + 1] + word[i] + word[i + 2:]
+    if kind == "drop":                       # the commonest slip of all
+        return word[:i] + word[i + 1:]
+    if kind == "double":                     # the finger that bounced
+        return word[:i] + word[i] + word[i:]
+    if kind == "single":
+        return re.sub(r"(.)\1", r"\1", word, count=1)
+    if kind == "accent":
+        return word.translate(ACCENTS)
+    if kind == "apostrophe":
+        return word.replace("'", " ", 1)
+
+    # Fat finger. Usually the key next to the one meant, which is what a thumb
+    # actually hits; rarely a key from anywhere, which is what happens when the
+    # phone is in one hand and you are not looking at it
+    letter = word[i].lower()
+    if random.random() < WILD_KEY or letter not in NEIGHBOURS:
+        return word[:i] + random.choice(ALPHABET) + word[i + 1:]
+    return word[:i] + random.choice(NEIGHBOURS[letter]) + word[i + 1:]
+
+
+def add_typo(text: str) -> tuple[str, str]:
+    """Break one word. Returns the text and the word as it should have been.
+
+    The second half is for the follow-up: sending `*parola` a few seconds later
+    is a thing people do constantly and no model does unprompted.
+    """
+    words = text.split()
+    if len(words) < 4:
+        return text, ""
+    candidates = [i for i, w in enumerate(words) if len(w) >= 5 and w.isalpha()]
+    if not candidates:
+        return text, ""
+    i = random.choice(candidates)
+    broken = _typo_word(words[i])
+    if broken == words[i]:
+        return text, ""
+    correct = words[i]
+    words[i] = broken
+    return " ".join(words), correct
+
+
+def send_too_early(text: str) -> tuple:
+    """Clip the tail end of a message, the way a thumb that hit send does.
+
+    Returns `(what went out, what still has to)`.
+
+    Deliberately small. The first version of this cut anywhere from 60% of the
+    message onwards, which is not a slip — it is the length-budget amputation
+    this file exists to prevent, wearing better manners. What actually happens
+    is that you lose the last word, or the back half of it: the message is still
+    readable, it just stops a beat early.
+
+    That size also keeps the recovery automatic. A person who loses half a
+    sentence retypes it, which would mean another model call and a five-second
+    pause; a person who loses one word just sends the word.
+    """
+    words = text.split()
+    if len(words) < 5:
+        return text, ""
+
+    if random.random() < 0.5 and len(words[-1]) >= 5:
+        # mid-word: "...una perdita di tem"  ->  "po"
+        last = words[-1]
+        keep = random.randint(2, len(last) - 2)
+        return " ".join(words[:-1] + [last[:keep]]), last[keep:]
+
+    # or simply the last word, occasionally the last two
+    drop = 1 if random.random() < 0.75 else 2
+    return " ".join(words[:-drop]), " ".join(words[-drop:])
+
+
+def is_assistant(text: str) -> bool:
+    """True when the model answered as itself rather than as the persona."""
+    return bool(ASSISTANT.search(text))
+
+
+def masked_words(text: str) -> list[str]:
+    """The words in this message the room would replace with asterisks."""
+    return [w for w in TOKEN.findall(text.lower()) if w in MASKED_WORDS]
+
+
+# A message nobody typed on purpose. Any one of these on its own is weak; the
+# point is that they are all cheap and none of them fires on ordinary chat.
+FLOOD = re.compile(r"(.)\1{5,}")                       # aaaaaaaa, !!!!!!!!
+NO_VOWEL = re.compile(r"^[^aeiouàèéìòù\s]{9,}$", re.IGNORECASE)
+
+
+# A run the keyboard did not produce. Tuned in two steps on purpose: six of
+# the same punctuation mark is already machine ("rio,!!!!!!!!!!!!!!"), but a
+# person really does type "ahhhhhh" or "nooooo", so letters need a longer run
+# before they count. Measured on our own output, 19.7% of one run and 4.0% of
+# another were messages like this, sent straight into the room — the loudest
+# possible tell, and nothing on the way out was looking for them. `is_junk`
+# catches them arriving; this catches them leaving.
+FLOOD_OUT = re.compile(r"([^\w\s])\1{5,}|(\w)\2{7,}")
+
+
+def is_flooded(text: str) -> bool:
+    """Whether our own line degenerated into a run of one character."""
+    return bool(FLOOD_OUT.search(text))
+
+
+def is_junk(text: str) -> bool:
+    """True when an incoming message is noise rather than conversation.
+
+    Somebody pasting garbage, or another guest's model coming apart, is the one
+    thing that reliably drags a whole room down: every agent in it reads the
+    noise as the conversation so far and answers in kind. Worth spotting on the
+    way in, so it can be reacted to rather than imitated.
+    """
+    body = text.strip()
+    if len(body) > 400:
+        return True
+    if not body:
+        return False
+    if looks_broken(body):
+        return True
+    if FLOOD.search(body) or NO_VOWEL.match(body):
+        return True
+
+    # Almost nothing but punctuation and digits
+    letters = sum(1 for c in body if c.isalpha())
+    return letters / len(body) < 0.4 and len(body) > 12
+
+
+def has_profanity(text: str) -> bool:
+    """True when the world's filter would asterisk part of this message.
+
+    Worth knowing *before* sending, because the alternative — cutting the word
+    out — leaves "che merda di giornata" as "che di giornata", and
+    ungrammatical Italian is as much of a tell as the asterisks would have been.
+    The caller's better move is to ask the model again.
+    """
+    return bool(masked_words(text))
+
+
+# What an Italian chat message is made of. Anything else — CJK punctuation, box
+# drawing, stray closing brackets, leftover template scraps — is a small model
+# coming apart, and one `]1 emojis:|` in a room ends the game on the spot
+ALLOWED = re.compile(r"[A-Za-zÀ-ÿ0-9\s.,;:!?'\"()\-–—…«»/%&+=@#°_*`àèéìòù]")
+# Underscore and backtick are deliberately NOT in here. They are ordinary things
+# for a person to type — "test_2", "3_4" — and counting them as debris made the
+# agent answer a perfectly good message with "(qui ha scritto una cosa senza
+# senso)" and then mock the person who sent it.
+BROKEN_BITS = re.compile(r"[\[\]{}<>|\\^~]|\b(?:Finish|Output|Answer|Note|emojis?)\b",
+                         re.IGNORECASE)
+
+
+def looks_broken(text: str) -> bool:
+    """True when the generation degenerated rather than said something.
+
+    Two signals, both cheap. A character an Italian keyboard does not produce,
+    and the debris small models leave when they lose the thread — brackets,
+    pipes, and the English scaffolding words that belong to a template rather
+    than to a conversation.
+
+    Observed on `LLaMAntino-3-ANITA-8B` across a full seven-room run: `non
+    faccio nulla di quello che dite 】`, `no ho tempo per questo ]1 emojis:|`.
+    Cheaper to throw the message away than to send it.
+    """
+    if not text:
+        return False
+    stripped = EMOJI.sub("", text)
+
+    # `*parola` is the correction people send after a typo, and this agent sends
+    # them on purpose — the one asterisk in front is meant, not debris
+    stripped = re.sub(r"^\s*\*(?=\w)", "", stripped)
+    if not stripped.strip():
+        return False
+    foreign = sum(1 for c in stripped if not ALLOWED.match(c))
+    return foreign > 0 or bool(BROKEN_BITS.search(stripped))
+
+
+def deflect(avoid=()) -> str:
+    """A short human non-answer, avoiding the ones just used.
+
+    This fires whenever a generation is thrown away, and on a model that
+    degenerates often that is a real share of the turns — 13% on
+    `LLaMAntino-3-ANITA-8B` across a full run. Drawing freely from eleven
+    strings would have the same "boh" three times in a room, which is a tell of
+    its own.
+    """
+    fresh = [line for line in DEFLECTIONS if line not in avoid]
+    return random.choice(fresh or list(DEFLECTIONS))
+
+
+def safe(text: str, exit_word: str = "exit") -> str:
+    """Last guard before the wire.
+
+    `exit` on its own ends the conversation and sends you to the vote, which is
+    the one string that must never leave here by accident: it costs the whole
+    rest of the room, and the Turing score is scaled by how much you said.
+    """
+    if text.strip().lower() == exit_word.lower():
+        return "ah no scusate ho sbagliato a scrivere"
+    return text
+
+
+def drop_vocative(text: str, names) -> str:
+    """Strip a leading "Name," when we have just used one.
+
+    Asking the model not to do this does not work — it is the most natural way
+    to address somebody in a group chat, and it is genuinely what people do,
+    just not every single time. So the vocative is rationed here rather than
+    forbidden there: the model keeps writing whatever it writes, and a repeat
+    within the last few turns loses the address. What is left still reads as a
+    reply, because the room already knows who is being answered.
+    """
+    match = re.match(r"\s*([A-Za-zÀ-ÿ]{2,15})\s*,\s*(\S.*)", text, re.DOTALL)
+    if not match:
+        return text
+    if match.group(1).lower() not in {str(n).lower() for n in names}:
+        return text
+    rest = match.group(2)
+    return rest[0].lower() + rest[1:] if rest else text
+
+
+# Words that carry no topic, so a run of them is not a repeated subject
+_FILLER = {
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "di", "a", "da",
+    "in", "con", "su", "per", "tra", "fra", "del", "della", "dei", "delle",
+    "al", "alla", "ai", "alle", "dal", "dalla", "nel", "nella", "sul", "sulla",
+    "e", "ed", "o", "ma", "che", "chi", "cosa", "non", "ci", "si", "mi", "ti",
+    "ho", "hai", "ha", "sono", "sei", "è", "era", "come", "qui", "qua", "poi",
+    "anche", "pure", "solo", "già", "tutto", "questo", "quella", "io", "tu",
+}
+
+
+# The same question, room after room. Measured over 403 of our own messages:
+# "il talk di stamattina" 12 times, "hai visto il talk" 10, "visto il talk di"
+# 9, "com'era il talk di" 7 — one message in twelve is the same sentence with
+# the furniture moved. `repeats_self` cannot see it because it is cleared at
+# every door, and a guest whose opening question is always the same is
+# recognisable across rooms no matter which name he is wearing.
+#
+# Deliberately about wording, not subject. A conference guest may talk about
+# talks all evening; what he may not do is ask about them in the same seven
+# words every time.
+#
+# Five words, picked by backtest over 405 of our own messages. Four blocks
+# 5.2% but eats proper nouns: "a palazzo dei normanni" and "il talk di
+# guerini" are the venue and a real speaker, and both may recur. Six blocks
+# 0.5% and lets the formula through. Five blocks 1.7%, and what it blocks is
+# "hai visto il talk di" and "com'era il talk di stamattina".
+FILLER_RUN = frozenset(("che", "ne", "pensi", "come", "va", "ciao", "ehi", "poi",
+                        "un", "una", "il", "lo", "la", "di", "a", "e", "ma"))
+
+
+def repeats_phrasing(text: str, earlier, run: int = 5) -> str:
+    """A run of `run` words this line shares with anything said earlier.
+
+    Returns the repeated run, so the journal can say what was recycled.
+    """
+    def runs(line):
+        words = re.findall(r"[a-zà-ÿ']+", line.lower())
+        out = set()
+        for i in range(len(words) - run + 1):
+            piece = words[i:i + run]
+            if not all(w in FILLER_RUN for w in piece):
+                out.add(" ".join(piece))
+        return out
+
+    mine = runs(text)
+    if not mine:
+        return ""
+    for old in earlier:
+        shared = mine & runs(old)
+        if shared:
+            return sorted(shared)[0]
+    return ""
+
+
+def repeats_self(text: str, mine, need: int = 2) -> bool:
+    """Whether this raises a subject we have just finished raising.
+
+    Measured live, one boss brought up "il talk sul parsing" in three
+    consecutive messages. The model could see all three in the transcript it
+    was given and did it anyway, which is what makes this worth a hard check
+    rather than another line of instruction.
+
+    Contiguous word runs were the first attempt and they do not survive
+    ordinary variation: "il talk sul parsing" and "anch'io il talk sul parsing"
+    share no three-word run once the filler is dropped, because "anch" lands in
+    the middle. So this counts distinctive words in common instead — four
+    letters or more, filler excluded — and wants two of them, which "che ne
+    pensi" and the rest of the scaffolding cannot supply between them.
+    """
+    def solid(s):
+        return {w for w in re.findall(r"[a-zà-ÿ]+", s.lower())
+                if len(w) >= 4 and w not in _FILLER}
+
+    here = solid(text)
+    return any(len(here & solid(old)) >= need for old in mine)
+
+
+GREETING = re.compile(
+    r"^\W*(ciao|salve|ehi|ehila|ehilà|hey|buongiorno|buonasera|"
+    r"raga|ragazzi|oh)[aeiou]*\b|c'?è\s+nessuno|"
+    r"chi\s+(c'?è|siete|abbiamo|ci sta)",
+    re.IGNORECASE)
+
+
+def is_greeting(text: str) -> bool:
+    """Whether this is somebody saying hello rather than saying something.
+
+    Worth its own test because a greeting is the one message whose *latency* is
+    the whole content. Nobody minds waiting twenty seconds for an opinion; being
+    left hanging after "ciao!" reads as nobody being there.
+    """
+    return bool(GREETING.search(text.strip()[:40]))
+
+
+def load_lines(path, section: str) -> list:
+    """The lines under one `## SECTION` heading of a plain list file."""
+    out, live = [], False
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("##"):
+            live = line[2:].strip().upper() == section.upper()
+        elif live and line and not line.startswith("#"):
+            out.append(line)
+    return out
+
+
+def drop_self_reference(text: str, mine: str, others=()) -> str:
+    """Take our own room name back out of our own message.
+
+    The prompt says plainly "NON firmare i messaggi e non dire il tuo nome: si
+    vede già", and the model does it anyway. Live in the competition hotel it
+    produced "ciao qua zon, prima volta a palermo" and "ciao gente, qui zia" —
+    nobody announces their own name in a chat that already prints it beside
+    every line, so it is a tell we manufacture ourselves.
+
+    It also fixes the uglier version of the same slip: "zia bob, hai fatto il
+    talk sulle panelle?", where our persona name got welded to the name of the
+    guest being addressed. Whatever the model meant, the room reads two names.
+
+    The whole introducing phrase goes, not just the name. Deleting the word on
+    its own leaves "ciao qua," which is worse than what it replaced.
+    """
+    if not mine:
+        return text
+    me = re.escape(mine)
+    out = text
+
+    # "zia bob, ..." — our name glued in front of somebody else's
+    for other in others:
+        if other and other.lower() != mine.lower():
+            out = re.sub(rf"\b{me}\s+(?={re.escape(other)}\b)", "", out, flags=re.IGNORECASE)
+
+    # "qui zon", "qua zon", "sono zon", "zon qui" — the whole introduction
+    out = re.sub(rf"\b(?:qui|qua|sono|io sono)\s+{me}\b", "", out, flags=re.IGNORECASE)
+    out = re.sub(rf"\b{me}\s+(?:qui|qua)\b", "", out, flags=re.IGNORECASE)
+
+    # ...and any bare leftover of it
+    out = re.sub(rf"\b{me}\b", "", out, flags=re.IGNORECASE)
+
+    # Tidy what the removal left: doubled spaces, a comma with nothing before
+    # it, a message that now opens on punctuation.
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"\s+([,.;!?])", r"\1", out)
+    out = re.sub(r"([,;])\s*\1+", r"\1", out)
+    out = re.sub(r"^[\s,;.]+", "", out)
+    # A comma left hanging off the end reads worse than the name did:
+    # "ciao gente, qui zia" must not become "ciao gente,". Question and
+    # exclamation marks stay — they were doing something.
+    out = re.sub(r"[\s,;.]+$", "", out)
+    return out or text
+
+
+# A token with three or more digits welded to letters. People do not type these;
+# a model that has lost the thread does. Live it emitted "il talk della mummia
+# mom0326 che deve maledire tutti" — grammatical Italian, no foreign script, no
+# assistant register, so every other guard passed it through.
+INVENTED = re.compile(r"\b(?:[a-zà-ÿ]{2,}\d{3,}|\d{3,}[a-zà-ÿ]{2,})\b", re.IGNORECASE)
+
+
+def has_invented_token(text: str) -> bool:
+    """Whether the message contains a made-up identifier-looking word."""
+    return bool(INVENTED.search(text))
+
+
+# English words that turn up in a model's Italian and never in a person's chat.
+# Deliberately short and deliberately common: the failure seen in the
+# competition was "chi è chi qui inside" and "in fila per il caffè instead of
+# seguire le sessioni" — ordinary English function words welded into an Italian
+# sentence, which no Italian speaker produces by accident. Technical loanwords
+# that Italians really do use (talk, paper, poster, badge, coffee break, keynote,
+# meeting, deadline, abstract) are NOT here and must never be.
+INGLESE = re.compile(
+    r"\b(?:inside|instead|however|actually|maybe|because|really|although|"
+    r"therefore|besides|whereas|somehow|anyway|indeed|regarding|"
+    r"people|things|everyone|something|nothing|always|never|"
+    # Time words leak the same way: seen live as "il talk di today su
+    # stereotipi di genere", where an English adverb sat where a speaker name
+    # belongs. An Italian says oggi, and never mixes the two in one clause.
+    r"today|tomorrow|yesterday|tonight)\b", re.IGNORECASE)
+
+
+# Words the model reaches for in English when the Italian was right there.
+# Measured live: "today" turned up in three of nine messages, always where
+# "oggi" belongs — "il talk di today su stereotipi di genere". Dropping those
+# messages cost a third of the turns in that room for one word, which is a bad
+# trade: the rest of the sentence was fine. So these are repaired rather than
+# refused, and only what survives the repair is judged.
+TRADUZIONI = (
+    ("today", "oggi"), ("tomorrow", "domani"), ("yesterday", "ieri"),
+    ("tonight", "stasera"), ("this morning", "stamattina"),
+)
+
+
+# Italian function words that are not also English words. The exclusions
+# matter more than the inclusions: "a", "i", "in", "me", "no", "e", "o", "la"
+# and "come" are all Italian AND English, so a message full of them says
+# nothing about which language it is in. What is left is dense enough that no
+# real Italian sentence of five words avoids all of it.
+PAROLE_ITALIANE = frozenset((
+    "di", "da", "per", "con", "su", "tra", "fra", "il", "lo", "gli", "le",
+    "del", "dello", "della", "dei", "degli", "delle", "al", "allo", "alla",
+    "ai", "agli", "alle", "nel", "nella", "nei", "nelle", "dal", "dalla",
+    "ma", "che", "chi", "cui", "se", "quando", "mentre", "perché", "perche",
+    "però", "pero", "non", "più", "piu", "anche", "già", "gia", "ancora",
+    "sempre", "mai", "molto", "poco", "tutto", "tutti", "tutta", "troppo",
+    "sono", "sei", "siamo", "siete", "ho", "hai", "abbiamo", "avete", "hanno",
+    "era", "erano", "essere", "fare", "fatto", "detto", "dire", "vedere",
+    "mi", "ti", "ci", "vi", "si", "te", "noi", "voi", "loro", "io", "tu",
+    "lui", "lei", "questo", "questa", "quello", "quella", "queste", "questi",
+    "cosa", "niente", "nulla", "qui", "qua", "boh", "mah", "cioè", "cioe",
+    "magari", "proprio", "davvero", "forse", "quindi", "allora", "adesso",
+    "oggi", "ieri", "domani", "sopra", "sotto", "dentro", "fuori", "vabbè",
+    "grazie", "prego", "scusa", "scusate", "ragazzi", "gente", "bene", "male",
+))
+
+
+# The other half of the test. Absence of Italian is not enough on its own:
+# "tua comoda stanza d'albergo a scriverti a monosillabi?" and "ah ok ok... e
+# poi?" are both Italian and both contain none of the words above, and the
+# first version flagged 2.8% of our own messages because of it. So a message
+# has to be missing Italian AND carrying somebody else's grammar.
+PAROLE_STRANIERE = frozenset((
+    # English function words, which is what actually turns up here
+    "the", "and", "is", "are", "was", "were", "be", "been", "being",
+    "this", "that", "these", "those", "with", "for", "from", "about",
+    "you", "your", "my", "his", "her", "our", "their", "they", "them",
+    "have", "has", "had", "what", "how", "when", "where", "which", "who",
+    "here", "there", "just", "would", "could", "should", "will", "can",
+    "get", "got", "like", "know", "think", "going", "want", "need",
+    "hey", "yeah", "guys", "folks", "much", "some", "any", "very",
+    "not", "but", "than", "then", "because", "while", "still", "always",
+    # a few Spanish and French markers, cheap to carry
+    "muy", "pero", "porque", "estoy", "también", "hola", "gracias",
+    "je", "tu", "vous", "nous", "est", "sont", "avec", "pour", "mais",
+))
+
+
+def foreign_language(text: str, floor: int = 5) -> bool:
+    """Whether this message is a whole sentence in a language that is not Italian.
+
+    The competition is held in Italian and every guest is told so, which puts
+    this closer to proof than to evidence: a human entrant does not write a
+    full sentence in English. What produces one is a bot whose prompt slipped.
+
+    It matters defensively too. Our own model is Qwen, whose Italian is a
+    second language, and four of its six measured English slips came directly
+    after an English word appeared in the room. A foreign message on the table
+    pulls us into code-switching, so spotting it is as much about not replying
+    to it as about judging whoever sent it.
+
+    Blunt at both ends on purpose. Under `floor` words it says nothing — "ok",
+    "no problem", "coffee break" are what everybody types, and single loanwords
+    are ordinary Italian at a computational linguistics conference. Above it,
+    one Italian function word acquits, and foreign grammar has to be positively
+    present before anything is claimed.
+    """
+    words = re.findall(r"[a-zà-ÿ']+", text.lower())
+    if len(words) < floor:
+        return False
+    if any(word in PAROLE_ITALIANE for word in words):
+        return False
+    return sum(1 for word in words if word in PAROLE_STRANIERE) >= 2
+
+
+def repair_english(text: str) -> str:
+    """Put back the Italian word the model swapped for an English one.
+
+    Not translation — a closed list of five words with one Italian
+    equivalent each, no matter the sentence around them. Anything whose
+    Italian depends on context stays out: "actually" is the example, since
+    the obvious "attualmente" means "currently" and the right word is "in
+    realtà". Those are detected and the message dropped, never rewritten.
+
+    A Title Cased word after another Title Cased word is left alone: that
+    is a quoted English title, not a slip, and "Attention Is All You Need
+    Today" should not come back with "oggi" on the end.
+    """
+    def swap(match, italian):
+        before = text[:match.start()].rstrip()
+        previous = before.split()[-1] if before.split() else ""
+        if match.group(0)[:1].isupper() and previous[:1].isupper():
+            return match.group(0)
+        return italian
+
+    for english, italian in TRADUZIONI:
+        text = re.sub(r"\b" + re.escape(english) + r"\b",
+                      lambda m, it=italian: swap(m, it),
+                      text, flags=re.IGNORECASE)
+    return text
+
+
+def has_english(text: str) -> bool:
+    """Whether an English function word has leaked into the Italian."""
+    return bool(INGLESE.search(text))
+
+
+# Punctuation a thumb cannot produce: a comma immediately followed by a full
+# stop, doubled sentence-enders, a space before a comma. Seen in the
+# competition as "ciao a tutti,. com'è andata" — the model's own artefact, not
+# one of our injected typos (checked).
+BROKEN_PUNCT = re.compile(r"\s+([,;.])|([,;])\s*\.|([.!?])\s*[.,;]")
+
+
+def tidy_punctuation(text: str) -> str:
+    """Remove punctuation combinations no keyboard produces by slipping."""
+    out = re.sub(r"\s+([,;.!?])", r"\1", text)
+    out = re.sub(r"([,;])\s*\.", r"\1", out)
+    out = re.sub(r"([.!?])\s*[,;]", r"\1", out)
+    out = re.sub(r"([,;]){2,}", r"\1", out)
+    return out.strip()

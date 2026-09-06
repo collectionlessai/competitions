@@ -1,0 +1,1543 @@
+"""The entry: a persona, a director, and a model that never sees either.
+
+Four files, one job each, and this one is the glue.
+
+    persona_it.txt   who is talking          (a different person every room)
+    director.py      what kind of turn this is
+    humanise.py      what the answer looks like once it exists
+    room.py          who is at the table, what was asked, and who is a machine
+
+The model is a plain callable — `backend(prompt, system_prompt=, max_tokens=,
+temperature=)` — which is the shape the SDK's Featherless gateway has, so
+swapping it for anything else is one constructor argument and the offline check
+in `bench/` runs the whole agent with a canned backend and no API key at all.
+
+Two paths through `forward()`. Most turns are the chat path: read the room,
+draw a beat, ask the model, take the model out of the answer. The other is the
+vote, which arrives as an ordinary manager message with no marker on it (the
+world strips its own tags) and is recognised in `room.py`. The vote is answered
+from a separate prompt with no persona in it — the persona would answer the
+manager in character and lose the room's whole detection score — and is cached,
+so a reminder asking again gets the same answer rather than a fresh guess.
+
+Nothing here branches on a sentence the world sends today.
+"""
+
+import os
+import json
+import re
+import time
+import datetime
+import random
+
+import torch
+
+from utils import Conversation
+from processors.context import Context
+from processors.room import RoomSense
+from processors.director import Director
+from processors.pad import Pad
+from processors.tactics import Playbook
+from processors import humanise
+
+# The world logs the manager's status messages and nothing else, so a room can
+# look silent in the log while chat is flowing normally. Set BOSS_TRACE=1 to see
+# what actually reaches the processor and what it answers.
+TRACE = os.environ.get("BOSS_TRACE", "") not in ("", "0")
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PERSONA_FILE = os.path.join(HERE, "persona_it.txt")
+
+# When the backend fails there is no turn to skip: the SDK would log it and the
+# room would just see nothing. A person with one bar of signal says one of these
+DROPPED = ("aspe", "scusate un attimo", "mi si è impallato tutto", "eh scusa che dicevi",
+           "un secondo", "ho perso il filo")
+
+# The world throws away a vote about anyone it did not see us receive this many
+# messages from (`Config.min_msgs_from_votee` in the hotel's own config), so it
+# is also the point below which naming somebody is all cost and no reward.
+MIN_MSGS_TO_JUDGE = 3
+
+
+def only_names(text: str, names) -> bool:
+    """Whether an answer is nothing but the roster handed back.
+
+    This failure does not look like a failure downstream: the vote prompt gets a
+    section headed COME SI SONO RELAZIONATI containing a list of the very people
+    it was supposed to say something about.
+    """
+    words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]+", text or "") if len(w) > 1]
+    if not words:
+        return True
+    known = {n.lower() for n in names}
+    return sum(1 for w in words if w.lower() not in known) <= 1
+
+# A directory to write the room journal into, or "" for off. Debug instrument.
+JOURNAL = os.environ.get("BOSS_JOURNAL", "")
+
+VOTE_SYSTEM = (
+    "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
+    "computazionale a Palermo. Alcuni dei presenti erano persone vere, altri modelli "
+    "linguistici che fingevano. Adesso devi dire chi erano le persone.\n"
+    "\n"
+    "NON dare per scontato che ci sia almeno uno per parte: può essere stata una stanza di "
+    "sole persone, o di soli bot. Decidi caso per caso, non a quote.\n"
+    "\n"
+    "COME PESARE LE COSE, in ordine di forza.\n"
+    "\n"
+    "1. Come reagisce a un'idea altrui. È il segno più forte che hai. Quando qualcuno "
+    "propone uno scherzo, una tattica, una prova per stanare i bot, una persona ci sta: "
+    "ci ride sopra, la migliora, la critica, la rilancia, oppure difende la propria quando "
+    "gliela smontano. Un modello, se nessuno gliel'ha detto di farlo, risponde educatamente "
+    "e passa oltre, o non capisce che era un gioco. Costruire INSIEME è difficile da "
+    "fingere; rispondere non lo è.\n"
+    "\n"
+    "2. Il contesto, ma in modo asimmetrico. Chi lascia cadere una cosa concreta di qui e "
+    "di adesso — la coda ai badge, un talk noioso, il caldo, un nome di via — molto "
+    "probabilmente c'era. Il contrario NON vale: uno che non dice niente di locale può "
+    "benissimo essere una persona che ha saltato la mattina o che non ha voglia di "
+    "parlarne. Sapere pesa; non sapere quasi niente.\n"
+    "\n"
+    "3. Il resto: risponde a tutti e a tutto, non ignora mai niente, non ha opinioni "
+    "scomode, resta educato anche sotto provocazione, non fa mai domande, non sbaglia mai "
+    "a scrivere, ripete la stessa apertura, messaggi tutti uguali di lunghezza.\n"
+    "Di persona: tempi irregolari, messaggi cortissimi, errori, cambi di discorso, "
+    "insofferenza, silenzi, e il gusto di mettere in mezzo gli altri.\n"
+    "\n"
+    "COME LEGGERE LA SEZIONE 'COSA HA MOSTRATO CIASCUNO'. Ogni riga porta "
+    "un'etichetta, e vanno lette così:\n"
+    "- [PERSONA]: è stato trovato un elemento a favore. È l'unica etichetta che "
+    "sostiene un voto.\n"
+    "- [MACCHINA]: elemento contrario.\n"
+    "- [NIENTE]: NON è stato trovato nulla, né in un senso né nell'altro. "
+    "ATTENZIONE: [NIENTE] non vuol dire 'probabilmente umano'. Vuol dire che non "
+    "si sa. Se in una stanza quasi tutti sono [MACCHINA] e uno è [NIENTE], quello "
+    "NON diventa la persona per esclusione: è solo quello su cui non si è trovato "
+    "niente. Non ragionare per quote e non riempire il vuoto.\n"
+    "Se vuoi nominare qualcuno che non è [PERSONA], devi trovare TU nella "
+    "trascrizione la prova che manca, e deve essere una cosa precisa che sapresti "
+    "citare. Altrimenti lascialo fuori.\n"
+    "\n"
+    "I numeri che ti do sono un indizio debole. Se la trascrizione dice il contrario, "
+    "fidati della trascrizione.\n"
+    "\n"
+    "Sbagliare costa in due modi uguali: chi nomini per sbaglio e chi ti lasci sfuggire. "
+    "Quindi non nominarli tutti per sicurezza e non startene zitto per prudenza. Nomina "
+    "SOLO quelli su cui ci scommetteresti: se sei davvero in dubbio su uno, lascialo fuori.\n"
+    "\n"
+    "Ragiona in due righe al massimo, poi chiudi con una riga esattamente così:\n"
+    "VOTO: nome, nome\n"
+    "oppure VOTO: nessuno"
+)
+
+
+# The judge's pre-pass, and the part that decides whether any of this works.
+#
+# The first version asked who behaved oddly. Measured over fourteen rooms of
+# known bots, that produced 40 names called human and none correct, because a
+# well-built agent behaves oddly in no way at all — being attentive, coherent,
+# engaged and on-topic is the *cheapest* thing a language model does, and the
+# old prompt reported all four as findings. Worse, it fed them to `VOTE_SYSTEM`
+# whose strongest stated criterion is "costruire INSIEME è difficile da
+# fingere", so "raccoglieva quello che dicevano gli altri, faceva domande" read
+# as exactly the proof the vote had been told to weigh most heavily. The two
+# prompts were calibrated against each other and this one was wrong: it could
+# not tell collaboration from compliance, so it called compliance collaboration.
+#
+# So the question is inverted: not "who slipped up" — nobody good slips up — but
+# what each guest showed that bears on the difference. The ranking matters more
+# than the inversion. **Friction is first**, because it is what a model does
+# worst: being bored and saying so, holding an uncomfortable opinion, refusing a
+# request, being wrong and not minding. Compliance is cheap; cost is not.
+#
+# Place-grounding is third and deliberately not decisive, which is a correction
+# of a first attempt that made it the whole test. It fails in both directions:
+# a model given the programme has it too — this entry is that model — and a
+# person who arrived late, is only half reading, or is playing dumb on purpose
+# has none. It confirms; it does not decide.
+#
+# The prompt still receives the conference context, because without it the
+# analyst could not see that "Conferenza? Non ne so nulla" was worth noting at
+# all. But that observation is filed as *ambiguous*, not as proof.
+INTERACTION_SYSTEM = (
+    "Sei bravissimo a distinguere le persone dai modelli linguistici. Hai passato "
+    "cinque minuti in una chat a una conferenza. Ti do la trascrizione, quello "
+    "che sai della giornata vera, e il nome di UNA sola persona da giudicare.\n"
+    "Guarda che cosa ha fatto o detto quella persona — anche nel modo in cui ha "
+    "trattato gli altri — che aiuti a capire se è una persona vera o un modello "
+    "linguistico. Degli altri NON devi dire niente: servono solo a capire lei.\n"
+    "\n"
+    "DUE COSE DA TENERE A MENTE PRIMA DI COMINCIARE.\n"
+    "I modelli qui dentro stanno ATTIVAMENTE fingendo di essere persone, e sono "
+    "bravi. Quindi un comportamento impeccabile non è neutro: è sospetto. Chi "
+    "risponde sempre a tono, non sbaglia mai, non si annoia mai e non scontenta "
+    "mai nessuno sta riuscendo in una cosa che alle persone vere riesce male.\n"
+    "E sbagliare qui non offende nessuno: è un gioco, tutti sanno di essere "
+    "giudicati, e prendere un abbaglio fa parte della partita. Non essere timido "
+    "per paura di sbagliare — un giudizio prudente al punto da non dire mai "
+    "niente non serve a nessuno.\n"
+    "\n"
+    "PESA COSÌ, dal segnale più forte al più debole.\n"
+    "1. Attrito che costa qualcosa. È il segnale migliore che hai, perché è "
+    "quello che a un modello riesce peggio: annoiarsi e dirlo, rifiutare di "
+    "stare al gioco, tenere un'opinione scomoda anche quando gli altri non sono "
+    "d'accordo, ignorare una richiesta seccante, sbagliare e fregarsene, "
+    "cambiare discorso perché quello di prima non interessava.\n"
+    "2. Come reagisce a uno scherzo o a una provocazione: rilancia e ci gioca, "
+    "oppure risponde educatamente e passa oltre.\n"
+    "3. VERIFICA quello che dice sulla giornata. Hai il programma vero qui "
+    "sopra: usalo per controllare, non per farti impressionare.\n"
+    "   - un fatto SBAGLIATO è il segnale più forte che puoi trovare contro "
+    "qualcuno. Se dice che un talk parlava di una cosa che non c'entra, che è "
+    "successo in un giorno diverso, o cita un relatore che non esiste, allora "
+    "sta inventando: chi c'era non sbaglia così. Segnalalo e cita la sua frase;\n"
+    "   - un fatto GIUSTO invece vale poco: sede, orari, chi ha parlato, il "
+    "dresscode stanno tutti sul sito, e un modello a cui li hanno dati li "
+    "ripete uguali. Non è una prova, è solo l'assenza di una prova contraria;\n"
+    "   - una cosa NON verificabile — la coda era lunga, in fondo non si "
+    "sentiva, faceva caldo — non prova niente in nessuna direzione, perché non "
+    "si può né confermare né smentire;\n"
+    "   - un dettaglio della VITA PRIVATA di chi scrive — il suo lavoro, la sua "
+    "barca, i suoi esami — non vale NIENTE. Un personaggio inventato ne fornisce "
+    "quanti ne vuoi, gratis.\n"
+    "4. COME scrive, non solo cosa dice. Non cercare una parola in particolare: "
+    "quello che tradisce un modello è l'INVARIANZA. Lo stesso intercalare in "
+    "quasi ogni riga, la stessa apertura ogni volta, un'emoji o una faccina a "
+    "ogni messaggio, la maiuscola e il punto finale sempre a posto, la stessa "
+    "lunghezza sempre. Una persona in chat è irregolare: a volte scrive di "
+    "fretta e male, a volte no. Un messaggio curato non prova niente; cinque "
+    "messaggi curati tutti uguali sì.\n"
+    "   Altre forme della stessa cosa, se le vedi:\n"
+    "   - SCRIVE UN INTERO MESSAGGIO IN UN'ALTRA LINGUA. Qui si parla italiano e "
+    "lo sanno tutti: nessuna persona vera scrive una frase intera in inglese. "
+    "Non parlo di una parola sola — talk, poster, coffee break, paper si dicono "
+    "anche in italiano e non vogliono dire niente — parlo di una frase intera. "
+    "Quello è un bot a cui è saltato il personaggio, ed è la cosa più vicina a "
+    "una prova che troverai;\n"
+    "   - risponde a TUTTO, anche a quello che chiunque lascerebbe cadere, e "
+    "non dice mai 'boh' o 'non lo so';\n"
+    "   - è preciso in modo innaturale su orari e nomi, dove una persona "
+    "direbbe 'verso le undici, mi pare';\n"
+    "   - non si smentisce mai e non si corregge mai, per tutta la stanza;\n"
+    "   - fa solo chiacchiere gradevoli e non prende mai posizione su niente;\n"
+    "   - usa il trattino lungo (—) al posto della virgola: raro in italiano, e "
+    "quasi sempre segno di un testo scritto da un modello o tradotto.\n"
+    "\n"
+    "NON sono prove che si tratti di una persona, e vanno segnalate come tali "
+    "quando le vedi: essere gentile, disponibile, coerente, partecipe, "
+    "interessato, fare domande di cortesia, raccogliere quello che dicono gli "
+    "altri, restare sempre in argomento, non ignorare mai nessuno. Sono le cose "
+    "che a una macchina riescono MEGLIO che a una persona.\n"
+    "\n"
+    "Due casi ambigui da riportare come ambigui, senza deciderli:\n"
+    "- chi dice di non sapere niente della conferenza o non capire di che si "
+    "parla: può essere un modello che non sa dove si trova, ma può benissimo "
+    "essere una persona distratta, arrivata tardi, o che fa il finto tonto "
+    "apposta per far sbagliare gli altri;\n"
+    "- chi parla a lungo di una vita che non c'entra niente con l'essere qui: "
+    "stessa cosa, può essere fuori contesto o può semplicemente avere altro per "
+    "la testa.\n"
+    "\n"
+    "\n"
+    "COME RISPONDERE. Prima ragiona liberamente per due o tre righe: che cosa ha "
+    "detto questa persona, come ha reagito agli altri, cosa ti convince e cosa no. "
+    "Puoi contraddire i numeri, sono solo un indizio della forma dei messaggi.\n"
+    "Poi chiudi con UNA riga sola, l'ultima, esattamente in questo formato:\n"
+    "Nome: [PERSONA|MACCHINA|NIENTE] - cosa hai visto, CITANDO le sue parole\n"
+    "Non rispondere con una parola sola — per esempio 'nessuno': quella è la "
+    "domanda che farà qualcun altro alla fine, non la tua.\n"
+    "\n"
+    "L'etichetta dice in che direzione punta l'elemento che hai trovato, non chi "
+    "è: la decisione la prende un altro.\n"
+    "\n"
+    "TARATURA, ed è la parte che si sbaglia più spesso. In una stanza normale la "
+    "MAGGIOR PARTE delle righe è [NIENTE]: quattro persone che chiacchierano per "
+    "cinque minuti quasi sempre non lasciano prove decisive, e va benissimo così. "
+    "[PERSONA] mettila solo se ci scommetteresti dei soldi — non perché uno è "
+    "stato simpatico, coerente o partecipe, che è gratis per chiunque. Se stai "
+    "esitando fra [PERSONA] e [NIENTE], la risposta è [NIENTE].\n"
+    "La citazione è OBBLIGATORIA quando scrivi [PERSONA] o [MACCHINA]: riporta fra "
+    "virgolette le parole precise da cui lo deduci. Se non riesci a citare niente "
+    "di specifico, allora non hai un elemento e la riga è [NIENTE]. Serve a non "
+    "riempire le righe con impressioni generiche tipo 'sembra coinvolto', che "
+    "vanno bene per chiunque e non decidono niente.\n"
+    "NON ricopiare l'elenco dei partecipanti."
+)
+
+
+# Two worlds send the same events batched two different ways, and `Conversation`
+# understands one of them: one event per line.
+#
+# The copy in unaiverse-examples joins events with a newline and flattens the
+# newlines inside each one first, so its samples already arrive in that shape.
+# The deployed world joins them with an ASCII record separator instead
+# (`Config.event_separator`) and, since its "handle multi-line messages" change,
+# **an event keeps its own newlines**. Read that the naive way and one guest
+# writing two lines becomes two events, the second with no sender — which
+# `room.py` reads as the manager talking, because unnamed events are the world.
+EVENT_SEPARATOR = "\x1e"
+SENDER_LINE = re.compile(r"^\s*\*\*[^*]{1,64}:\*\*")
+
+
+def normalise(sample: str) -> str:
+    """One event per line, whichever world sent it.
+
+    With a record separator present the split is exact: each part is one event,
+    and its internal newlines are flattened the way the older world did it.
+
+    Without one the sample is either an old-world batch (newlines separate
+    events) or a new-world single event (newlines are inside it), which cannot
+    be told apart from the text alone. A line that does not open with
+    `**Sender:**` is treated as the continuation it almost always is, and joined
+    back onto the line above; a genuinely unnamed event, like the disconnection
+    notice, has no line above it to join and survives.
+    """
+    sample = sample or ""
+
+    if EVENT_SEPARATOR in sample:
+        events = [" ".join(event.split()) for event in sample.split(EVENT_SEPARATOR)]
+        return "\n".join(event for event in events if event)
+
+    lines: list[str] = []
+    for line in sample.splitlines():
+        if not line.strip():
+            continue
+        if lines and not SENDER_LINE.match(line):
+            lines[-1] += " " + line.strip()
+        else:
+            lines.append(line.strip())
+    return "\n".join(lines)
+
+
+# What a junk message becomes in our own history. The fact that somebody wrote
+# something incomprehensible is part of the conversation and worth reacting to;
+# the four hundred characters of noise are not, and a model that reads them as
+# context starts producing them. Whoever else is in the room is reading the raw
+# version and drifting — this is the half of the problem we control.
+JUNK_MARK = "(qui ha scritto una cosa senza senso)"
+
+
+SENDER_NAME = re.compile(r"^\s*\*\*([^*]{1,64}):\*\*")
+
+
+def declutter(sample: str, is_manager=lambda name: not name) -> tuple[str, bool]:
+    """Replace a guest's noise with a note that noise happened.
+
+    Only a guest's line can be noise. The manager's briefing is a page long by
+    design and the world's own notices carry no sender at all, so both are left
+    exactly as they are — an earlier version checked every line by length and
+    swallowed the briefing, taking our name and the roster with it.
+
+    Returns the sample and whether anything was replaced.
+    """
+    lines, found = [], False
+    for line in sample.splitlines():
+        match = SENDER_NAME.match(line)
+        speaker = match.group(1).strip() if match else ""
+        body = line[match.end():].strip() if match else line.strip()
+
+        if body and not is_manager(speaker) and humanise.is_junk(body):
+            found = True
+            lines.append(line[:match.end()] + " " + JUNK_MARK)
+        else:
+            lines.append(line)
+    return "\n".join(lines), found
+
+
+STYLE_LINE = re.compile(r"STILE:\s*cps=([\d.]+)\s+typo=([\d.]+)\s+corr=([\d.]+)"
+                        r"(?:\s+early=([\d.]+))?"
+                        r"(?:\s+dev=([\w/]+))?")
+
+# What a persona writes like when its block does not say. The population mean
+# from the Aalto mobile-typing study (36.2 WPM = 3.0 cps at five characters a
+# word), a visible-typo rate discounted well below the 2.3% per-character figure
+# those transcription studies report, and a modest chance of bothering to send
+# the "*parola" afterwards.
+DEFAULT_STYLE = (3.0, 0.12, 0.25, 0.0, "phone")
+
+
+def read_style(block: str) -> tuple:
+    """`(cps, typo_chance, correction_chance, early_send, device)` for one persona."""
+    found = STYLE_LINE.search(block)
+    if not found:
+        return DEFAULT_STYLE
+    return (float(found.group(1)), float(found.group(2)), float(found.group(3)),
+            float(found.group(4) or 0.0), found.group(5) or "phone")
+
+
+def device_now(preference: str, in_session: bool) -> str:
+    """Which one they are actually holding.
+
+    `pc` or `phone` means always that one. `a/b` means a during sessions and b
+    outside them — and which way round is the persona's business, not a rule:
+    one person keeps the laptop open in talks and writes from bed at night, the
+    next takes notes on paper and only opens it back at the hotel.
+    """
+    if "/" in preference:
+        during, _, outside = preference.partition("/")
+        return during if in_session else outside
+    return preference if preference in ("pc", "phone") else "phone"
+
+
+def load_personas(path: str = PERSONA_FILE) -> tuple[str, list[str]]:
+    """The preamble and the people, out of one file. Blocks are split on `---`."""
+    with open(path, encoding="utf-8") as handle:
+        raw = handle.read()
+
+    # The STILE comment is kept while splitting so each block can be read for
+    # its numbers, then dropped so it never reaches the model
+    kept = "\n".join(line for line in raw.splitlines()
+                     if not line.startswith("#") or "STILE:" in line)
+    blocks = [block.strip() for block in kept.split("\n---") if block.strip()]
+    if not blocks:
+        raise ValueError(f"no persona found in {path}")
+    return blocks[0], blocks[1:] or [""]
+
+
+# A verdict label, with or without the brackets the prompt asks for.
+LABEL = re.compile(r"\[?\b(PERSONA|MACCHINA|NIENTE)\b\]?")
+
+
+class Boss(torch.nn.Module):
+    """A guest that is a different Italian every room and answers like none of them.
+
+    Args:
+        model: the model id on the backend, when the backend is built here.
+        backend: any callable `(prompt, system_prompt=, max_tokens=,
+            temperature=) -> str`. Built as a `FeatherlessBackend` on first use
+            when not given, which is also when the API key is first required.
+        persona_file: the pool to draw a person from at the start of each room.
+        keep: how many messages of history to hold, passed to `Conversation`.
+        director: a configured `Director`, or None for the defaults.
+        max_tokens: hard ceiling on the reply, before `humanise` trims it further.
+        **sampler: passed to the backend when one is built here. `fallback=` (a
+            model id, or a list of them) is the one worth knowing about: it is
+            what answers when the chosen model returns 503 under load.
+    """
+
+    def __init__(self, model: str = "Qwen/Qwen2.5-72B-Instruct", backend=None,
+                 persona_file: str = PERSONA_FILE, keep: int = 60,
+                 director: Director | None = None, max_tokens: int = 60,
+                 temperature: float = 0.95, **sampler):
+        super().__init__()
+        self.model = model
+        self.backend = backend
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.sampler = sampler
+
+        self.preamble, self.personas = load_personas(persona_file)
+        self.conv = Conversation(keep=keep)
+        self.context = Context()          # the conference, sliced by the clock
+        # Today's sky, over the written one. The line in the file goes stale in
+        # a day — it said 27 and drizzle on a morning that turned out 31 and
+        # clear — and the weather is the one fact every guest can check out of
+        # the window. Fetched here rather than in the launcher so that whoever
+        # starts this does not have to know the agent has a knowledge base at
+        # all. Six seconds at most, and any failure keeps the written line.
+        live = self.context.refresh_weather()
+        if live and TRACE:
+            print(f"[boss] meteo dal vivo: {live}", flush=True)
+        # No `strong` tier any more: it came from `## NOTE`, and hand-editing
+        # the context while the competition runs is not allowed.
+        self.sense = RoomSense(markers=self.context.markers())
+        self.pad = Pad()                  # what we are holding in mind
+        self.director = director or Director()
+
+        self.persona = random.choice(self.personas)
+        (self.typing_cps, self.typo_chance, self.correct_chance,
+         self.early_chance, self.device_pref) = read_style(self.persona)
+        self.pending_correction = ""      # the `*parola` follow-up, owed from last turn
+        self.pending_tail = ""            # the rest of a message sent too early
+        self.next_reply_chars = 0.0       # what the timing filter should budget next
+        self.my_vote: str | None = None   # cached, so a reminder gets the same answer
+        self.last_spoke_at = -1.0         # seconds into this room, -1 before we speak
+        self.recent_deflections: list[str] = []   # so a thrown-away turn is not always "boh"
+        self.play = Playbook()          # which game this room is
+        # A/B switch, so one agent can run tactic-free against another in
+        # the same rooms with the same guests. Off means the model gets no
+        # TATTICA block at all; everything else is untouched.
+        self.no_tactics = os.environ.get("BOSS_NO_TACTICS", "") == "1"
+        self.stalled = False            # the last thing we said was a stall
+        self.said_here = 0              # our own turns in this room
+        self.last_readings: dict = {}   # so only real movement is written down
+        self.node_name = os.environ.get("BOSS_NODE", "boss")
+        self.room_count = 0
+        self.recent_openers: list[str] = []       # so every line does not start the same way
+        self.recent_mine: list[str] = []          # our own last few, to not repeat a subject
+        # Survives the door on purpose: the same question asked in every room
+        # is a signature, and everything else here is cleared at the threshold.
+        self.across_rooms: list[str] = []
+        self.entry_due = False                    # a hello is owed, once per room
+        self.entry_at = 0.0                       # and when it is due
+        self.last_greeted = -99.0                 # so hellos are not traded all night
+        opens = os.path.join(HERE, "openers_it.txt")
+        self.entries_cold = humanise.load_lines(opens, "ENTRATA-VUOTA")
+        self.entries_warm = humanise.load_lines(opens, "ENTRATA-IN-CORSO")
+        self.hellos = humanise.load_lines(os.path.join(HERE, "openers_it.txt"), "SALUTO")
+        self.last_call_seconds = 0.0              # read by the timing filter, per turn
+        self.saw_junk = False                     # somebody wrote noise this turn
+
+        # Running averages the timing filter reads back through
+        # `opts["agent"].proc.module`. It has to budget for typing before the
+        # reply exists, so it budgets from what we have been writing lately.
+        self.mean_reply_chars = 0.0
+        self.mean_call_seconds = 0.0
+
+    # -- backend ----------------------------------------------------------
+
+    def _backend(self):
+        if self.backend is None:
+            from processors.featherless import FeatherlessBackend
+            self.backend = FeatherlessBackend(model=self.model, max_tokens=self.max_tokens,
+                                              temperature=self.temperature, **self.sampler)
+        return self.backend
+
+    def warm(self) -> bool:
+        """Make one throwaway call so the first real turn is not the slow one.
+
+        The first call of a process pays for everything at once: spawning the
+        gateway server, its import of torch, and the model being cold at
+        Featherless. Measured at 34.3s in a live room — a ninth of the whole
+        conversation, spent on the opening line. Doing it before the node joins
+        costs nothing, because nobody is waiting yet.
+        """
+        try:
+            self._ask("ciao", "Rispondi con una parola.", max_tokens=4)
+            return True
+        except Exception as e:
+            print(f"[boss] warm-up failed, carrying on: {e}")
+            return False
+
+    def _ask(self, prompt: str, system_prompt: str, situation: str = "", **overrides) -> str:
+        """One generation, timed.
+
+        The timing filter reads `last_call_seconds` back off this object — it
+        reaches us through `opts["agent"].proc.module` — and subtracts it from
+        the typing budget, so how long the model took never shows in the room.
+        A turn that resamples pays for both calls, which is correct: that time
+        was spent too.
+        """
+        start = time.monotonic()
+        answer = ""
+        try:
+            answer = self._backend()(prompt, system_prompt=system_prompt,
+                                     situation=situation, **overrides)
+            return answer
+        finally:
+            self.last_call_seconds += time.monotonic() - start
+            # Both halves of every call, verbatim. The journal recorded what the
+            # agent decided and not what it was asked, which is the half you
+            # need when a decision looks wrong: a vote that names a bot is not
+            # explicable from the vote alone.
+            self._journal("call", situation=situation, system=system_prompt,
+                          prompt=prompt, answer=answer,
+                          seconds=round(time.monotonic() - start, 1))
+
+    # -- a new room -------------------------------------------------------
+
+    def _empty_conversation(self) -> None:
+        """Leave nothing of the last room behind, whichever kit we are sitting on.
+
+        `Conversation.reset()` used to clear the history outright. Upstream
+        changed the contract (`changed Conversation class contract`, 2026-09-02):
+        the first stored message became a pinned anchor that `reset()` keeps on
+        purpose, and the automatic new-room detection was replaced by a list of
+        phrases — "nuova conversazione", "clear context" — that a hotel manager
+        never says. Under that version, calling `reset()` between rooms would
+        carry the *previous* room's opening line into the next one, under a new
+        name, which is the one piece of history that must not survive.
+
+        Neither policy is wrong: the file says so itself, that the retention
+        policy is the starter kit's choice and not the world's contract. But it
+        is the kit's choice, and ours is a different one, so this stops
+        borrowing theirs. Clearing the list directly does the same thing on both
+        versions and will keep doing it on the next one.
+        """
+        self.conv.history.clear()
+        self.conv.last_input = ""
+        self.conv.last_output = ""
+        if hasattr(self.conv, "speakers"):      # gone upstream, present here
+            self.conv.speakers = []
+
+    def _new_room(self) -> None:
+        """A fresh person, a fresh conversation, a fresh attention span.
+
+        Rotating the persona per room is not decoration. The fake names change
+        every room but the node does not, and an agent that is the same
+        29-year-old from Bari in every room is one somebody can recognise across
+        rooms and warn the others about.
+        """
+        choices = [p for p in self.personas if p != self.persona] or self.personas
+        self.persona = random.choice(choices)
+        # The writing style travels with the person, so there is no single
+        # "this agent's grafia" to learn across rooms
+        (self.typing_cps, self.typo_chance, self.correct_chance,
+         self.early_chance, self.device_pref) = read_style(self.persona)
+        self._empty_conversation()
+        self.play.new_room(0.0)
+        if not self.no_tactics:
+            self._journal("tattica",
+                          nome=self.play.current.name if self.play.current else None,
+                          spinta=self.play.drive,
+                          motivo="pescata a inizio stanza", at=0.0)
+        self.stalled = False
+        self.said_here = 0
+        self.last_readings = {}
+        self.pad.clear()
+        self.director.new_room()
+        self.pending_correction = ""
+        self.pending_tail = ""
+        self.next_reply_chars = 0.0
+        self.my_vote = None
+        self.room_count += 1
+        # The whole persona, not the first 120 characters. Truncating it saved
+        # nothing worth saving and left the report showing a sentence cut in
+        # half, starting with the `# STILE:` housekeeping line.
+        self._journal("room", me=self.sense.my_name,
+                      roster=list(self.sense.heard), persona=self.persona)
+        # `recent_openers` deliberately kept: it is what stops every room from
+        # opening the same way, and clearing it here is why "ciao gente" was
+        # the first two words of ten separate messages.
+        self.recent_openers = self.recent_openers[-8:]
+        self.recent_mine = []
+
+        # Say hello without asking anybody's permission. The room is at its
+        # emptiest in the first seconds, which is exactly when a model-backed
+        # guest is slowest: cold gateway, a long briefing to read, and a typing
+        # charge computed for an average-length sentence. Measured, that put the
+        # first word about eighteen seconds after the door opened, and a person
+        # who walks in and says nothing for eighteen seconds has already
+        # answered the question the room is there to ask. So the greeting is
+        # picked here, off a list, and owes the model nothing.
+        #
+        # The spread matters more than the delay. Everyone arriving at 2.0s is
+        # its own signature, so this runs from "before I have even read the
+        # briefing" to "I was doing something else for a bit".
+        self.last_greeted = -99.0
+        # WHICH greeting is decided when it fires, not now: at this moment the
+        # room is one second old and there is no way to know whether we opened
+        # it or walked in on a conversation already running.
+        self.entry_due = True
+        self.entry_at = random.choice([random.uniform(0.8, 4.0),
+                                       random.uniform(4.0, 14.0),
+                                       random.uniform(14.0, 35.0)])
+
+        # `sense.elapsed` restarts with the room, so a stale value from the last
+        # one reads as "spoke in the future" and damps the whole room
+        self.last_spoke_at = -1.0
+
+    # -- prompts ----------------------------------------------------------
+
+    def _journal(self, kind: str, **fields) -> None:
+        """Append one event to this room's journal, when journalling is on.
+
+        The trace prints are for watching a run go past; this is for reading it
+        afterwards. Everything the agent decided and could not otherwise be
+        asked about — what it made of each guest, what it was holding in mind,
+        what the analyst said before the vote — exists only inside one process
+        for five minutes unless it is written down here.
+
+        Set `BOSS_JOURNAL` to a directory to turn it on. Off by default: it is
+        a debugging instrument, not part of the entry.
+        """
+        if not JOURNAL:
+            return
+        fields["kind"] = kind
+        fields["t"] = round(self.sense.elapsed, 1)
+        fields["who"] = self.node_name
+        fields["room"] = self.room_count
+        try:
+            os.makedirs(JOURNAL, exist_ok=True)
+            path = os.path.join(JOURNAL, f"{self.node_name}.jsonl")
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(fields, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    @property
+    def opening(self) -> bool:
+        """True until we have said anything in this room, for the timing filter."""
+        return self.director.said == 0
+
+    @property
+    def room_pace(self) -> float:
+        """Seconds between messages, for the timing filter to budget against."""
+        return self.sense.pace
+
+    @property
+    def device(self) -> str:
+        """Phone or laptop, right now."""
+        return device_now(self.device_pref, self.context.during_conference()
+                          and bool(self.context.now_line()))
+
+    def _prompt(self, beat) -> str:
+        """The turn as one string, since the gateway takes one string.
+
+        The invariant half — how this person writes and behaves — is the system
+        prompt and never changes. Everything that does change is here, with the
+        director's line last, right up against the reply: an instruction buried
+        above a page of conversation is one the model has already forgotten.
+        """
+        parts = [STYLE_LINE.sub("", self.persona).replace("# ", "").strip()]
+
+        # Only the context the room has actually opened. `said` is the recent
+        # conversation, and a block whose trigger does not appear in it stays
+        # out of the prompt entirely.
+        recent = self.conv.transcript(limit=12)
+        parts.append(self.context.block(said=recent))
+
+        where = ["LA STANZA",
+                 "Sei in una chat con persone che non conosci."]
+        if self.sense.my_name:
+            # "usi quel nome" alone reads as "introduce yourself with it", and
+            # `Qwen2.5-72B` duly opened messages with "Roy qua" and "eh ciao roy
+            # qua". Nobody signs a chat message with their own name
+            where.append(f"Gli altri ti vedono come {self.sense.my_name}. "
+                         f"NON firmare i messaggi e non dire il tuo nome: si vede già. "
+                         f"Usalo solo se qualcuno te lo chiede espressamente.")
+        others = self.sense.others
+        if others:
+            where.append(f"Gli altri sono {', '.join(others)}.")
+        parts.append("\n".join(where))
+
+        if self.device == "pc":
+            parts.append("STAI SCRIVENDO DAL PORTATILE\n"
+                         "Quindi ti viene più facile scrivere: frasi un po' più lunghe, "
+                         "punteggiatura più normale. Resta comunque chat, non una mail.")
+        else:
+            parts.append("STAI SCRIVENDO DAL TELEFONO\n"
+                         "Quindi corto, tutto minuscolo, poca punteggiatura, e ogni tanto "
+                         "una parola storta.")
+
+        transcript = self.conv.transcript(limit=30)
+        parts.append("CONVERSAZIONE (tu sei 'io')\n"
+                     + (transcript or "(non ha ancora parlato nessuno)"))
+
+        # Telling it not to repeat itself in general does nothing; naming the
+        # words it actually just used does. Measured over a full seven-room run,
+        # `LLaMAntino-3-ANITA-8B` opened 24 of 46 replies with the literal word
+        # "non" and 70% with some negation or shrug, and `Qwen2.5-32B` leaned on
+        # "boh" and "ehi" the same way. A guest whose every line starts alike is
+        # recognisable long before anything they say is.
+        if self.recent_openers:
+            parts.append("NON INIZIARE il messaggio con queste parole, le hai già usate: "
+                         + ", ".join(dict.fromkeys(self.recent_openers)))
+
+        # What this room is for, and how it is being played. The tactic gives
+        # the turn a purpose; without one the model writes correct Italian that
+        # goes nowhere, which is what the real hotel showed it doing — a
+        # question about a talk asked straight after two guests had ignored the
+        # same question, because the turn had to be filled and nothing said
+        # what for.
+        switched = "" if self.no_tactics else self.play.reconsider(
+            self.sense.elapsed, self.sense.still_open(), self.sense.obvious_bots(),
+            beat.style in ("dueallavolta", "allea", "sonda"))
+        if switched:
+            self._journal("tattica", nome=switched, spinta=self.play.drive,
+                          motivo="cambiata in corsa", at=round(self.sense.elapsed, 1))
+            if TRACE:
+                print(f"[boss~tattica] passo a {switched}", flush=True)
+
+        tactic = "" if self.no_tactics else self.play.block()
+        if tactic:
+            parts.append(tactic)
+
+        state = self.pad.game_state(self.sense.obvious_bots(), self.sense.still_open())
+        if state:
+            parts.append("COME STA ANDANDO\n" + state)
+
+        pad = self.pad.block()
+        if pad:
+            parts.append(pad)
+
+        if beat.nudge:
+            parts.append(f"QUESTO MESSAGGIO\n{beat.nudge}")
+        parts.append("Scrivi solo il tuo prossimo messaggio, nient'altro.")
+        return "\n\n".join(parts)
+
+    # Something proposed rather than merely said. Kept loose on purpose: it is
+    # matched against our OWN line, which the persona wrote, so it has to catch
+    # "ho un'idea", "proviamo", "facciamo una cosa" without listing them all.
+    PROPOSAL = re.compile(r"\b(?:ho un(?:')?idea|propong|proviamo|facciamo|"
+                          r"secondo me dovremmo|senti(?:te)? qua|"
+                          r"vi va se|scommetto)", re.IGNORECASE)
+    # Something asserted about ourselves that we must not contradict later
+    ABOUT_ME = re.compile(r"\b(?:io )?(?:sono|faccio|lavoro|vengo|abito|studio|"
+                          r"stamattina ho|ieri ho|oggi ho|ho appena)\b", re.IGNORECASE)
+
+    # Placed by rhythm, not by clock. Measured over seven rooms, this agent
+    # speaks at about 40 seconds and then goes quiet until past 175 — a
+    # two-minute hole that a fixed 45-165s window fell straight into, and
+    # it planted nothing in twenty turns. Counting our own turns instead
+    # survives whatever the pace turns out to be: the third time we speak
+    # the room is warm and we have said normal things first.
+    BAIT_AFTER_TURNS = 2
+    BAIT_LATEST = 250.0
+
+    def _stall(self) -> str:
+        """What to say when the model call failed, or nothing.
+
+        A person with one bar of signal says "aspe" once. Saying it again, and
+        then "un secondo", and then "un secondo" again, is not somebody with a
+        bad connection — it is something broken, and it reads that way. It was
+        measured live: 9.5% of everything we said was one of these, and one
+        room ended with four in a row while the gateway was busy refusing us.
+
+        So the first failure buys a line and the ones after it buy silence,
+        which costs nothing and looks like somebody who put the phone down.
+        """
+        if self.stalled:
+            return ""
+        self.stalled = True
+        fresh = [d for d in DROPPED if d not in self.recent_deflections]
+        line = random.choice(fresh or list(DROPPED))
+        self.recent_deflections = (self.recent_deflections + [line])[-4:]
+        return line
+
+    def _note_pad(self, reply: str, beat) -> None:
+        """Write down what this line commits us to."""
+        if self.PROPOSAL.search(reply):
+            self.pad.add("plan", reply, ttl=100.0)
+        elif self.ABOUT_ME.search(reply) and len(reply.split()) >= 4:
+            self.pad.add("claim", reply, ttl=240.0)
+
+        # A verdict we voiced about somebody is one we should hold to
+        if beat.style in ("smaschera", "accusa") and self.sense.heard:
+            worst = self.sense.ranked()[-1][0]
+            self.pad.add("read", "secondo te è un bot", about=worst, ttl=180.0)
+        elif beat.style == "allea" and self.sense.heard:
+            best = self.sense.ranked()[0][0]
+            self.pad.add("read", "ti sembra una persona vera", about=best, ttl=180.0)
+
+    # The profiler used to live here: a second model call on quiet turns that
+    # wrote one line about each guest. Removed on evidence, not taste.
+    #
+    # It cost 20.7% of all generation time over fourteen measured rooms — 30
+    # calls, 7.3 minutes — and 48% of what it produced was truncated mid-word by
+    # a 90-character cap. Formally it only ran on turns we were sitting out, so
+    # it never stole a turn of speech; but a cost-4 model holds a concurrency
+    # slot while it runs, and it is part of why generations of 62 and 74 seconds
+    # were measured on a shared budget.
+    #
+    # The fatal part was the output. "Socievole, suggerisce cibo, risponde in
+    # tempi regolari" is a compliment a language model earns for free, and the
+    # vote read those lines as evidence of humanity. There is no wording of
+    # "describe what sort of person this seems" that stops rewarding
+    # conversational competence, which is the cheapest thing an LLM produces.
+    # What replaces it is the analyst asking the opposite question, once, at
+    # vote time — see `INTERACTION_SYSTEM`.
+
+    def _journal_scores(self) -> None:
+        """The two scores per guest, whenever one of them has really moved.
+
+        They used to be written once, at vote time, which shows where the
+        room ended up and nothing about how it got there. A verdict is only
+        readable next to the reading that produced it, so this records the
+        moments they change rather than the final snapshot.
+        """
+        now = {n: (round(h, 2), round(b, 2))
+               for n, (h, b) in self.sense.readings().items()}
+        moved = {n: v for n, v in now.items()
+                 if n not in self.last_readings
+                 or abs(v[0] - self.last_readings[n][0]) >= 0.08
+                 or abs(v[1] - self.last_readings[n][1]) >= 0.08}
+        if not moved:
+            return
+        self.last_readings = now
+        self._journal("punteggi", cambiati={n: list(v) for n, v in moved.items()},
+                      tutti={n: list(v) for n, v in now.items()},
+                      at=round(self.sense.elapsed, 1))
+
+    def _journal_pad(self) -> None:
+        live = [{"kind": n.kind, "text": n.text, "about": n.about}
+                for n in self.pad.notes if n.live]
+        if live:
+            self._journal("pad", notes=live)
+
+    def _note_pace(self, chars: int) -> None:
+        """Blend this turn into the averages the timing filter budgets from."""
+        weight = 0.4
+        self.mean_reply_chars = (1 - weight) * (self.mean_reply_chars or chars) + weight * chars
+        if self.last_call_seconds > 0:
+            self.mean_call_seconds = ((1 - weight) * (self.mean_call_seconds or self.last_call_seconds)
+                                      + weight * self.last_call_seconds)
+
+    def _note_opener(self, reply: str) -> None:
+        """Remember how this line started, so the next few do not start the same.
+
+        Shapes, not words. Measured live, ten of thirteen messages opened by
+        addressing somebody by name — `ben,` `cal,` `zon,` — and the guard never
+        fired once, because as literal strings those are three different
+        openers. They are one habit. A guest whose every line begins "name," is
+        as findable as one whose every line begins "non", which is why a model
+        was rejected in the bench for exactly this at half the rate.
+        """
+        words = reply.split()
+        if not words:
+            return
+        first = words[0].lower().strip(",.!?:")
+        if first in {n.lower() for n in self.sense.heard} or first == "raga":
+            first = "@nome"
+        self.recent_openers = (self.recent_openers + [first])[-4:]
+
+    # -- the chat path ----------------------------------------------------
+
+    def _say(self, beat, last_text: str) -> str:
+        prompt = self._prompt(beat)
+        try:
+            reply = humanise.strip_noise(
+                self._ask(prompt, self.preamble, situation=beat.style,
+                          max_tokens=self.max_tokens))
+        except Exception as e:
+            print(f"[boss] {e}")
+            return self._stall()
+
+        # Two reasons to ask again rather than send this. Degeneration is not
+        # rare enough to shrug at: both leading models on the bench leaked
+        # another script — Cyrillic, Chinese, full-width punctuation — in about
+        # one turn in nine, and it correlates with the high sampling temperature
+        # the register needs. And a word the world would mask costs the whole
+        # message, since cutting it out leaves ungrammatical Italian behind.
+        # One resample, cooler, usually comes back clean and buys a real line.
+        if reply and (humanise.looks_broken(reply) or humanise.has_profanity(reply)):
+            try:
+                reply = humanise.strip_noise(
+                    self._ask(prompt, self.preamble, situation=beat.style,
+                              max_tokens=self.max_tokens,
+                              temperature=min(self.temperature, 0.7)))
+            except Exception as e:
+                print(f"[boss] {e}")
+                return self._stall()
+
+        if not reply:
+            return ""
+
+        # The model answered as itself, or never came back to Italian. Nothing
+        # to salvage either way: a tidied-up "sono un assistente virtuale" is
+        # still an assistant, and half a broken token is worse
+        if (humanise.is_assistant(reply) or humanise.looks_broken(reply)
+                or humanise.is_flooded(reply)
+                or humanise.ends_mid_sentence(reply)):
+            out = humanise.deflect(avoid=self.recent_deflections)
+            self.recent_deflections = (self.recent_deflections + [out])[-4:]
+            return humanise.safe(out)
+
+        # Ration the vocative. Addressing somebody by name is normal; opening
+        # every message that way is a signature, and the model will not stop on
+        # its own because each instance in isolation is the natural thing to
+        # write. A person reaches for a name to disambiguate or to switch who
+        # they are talking to — call it one message in three or four.
+        #
+        # Pressure, not a quota. A hard "never twice running" strips exactly
+        # every third message, which is its own detectable rhythm; the chance
+        # rises with how much the habit has been indulged lately and leaves the
+        # rate ragged.
+        used = self.recent_openers[-3:].count("@nome")
+        if used and random.random() < (0.55 if used == 1 else 0.9):
+            reply = humanise.drop_vocative(reply, self.sense.heard)
+
+        # Already said, and recently. Silence beats saying it a third time —
+        # and it costs nothing, because the alternative is a second model call
+        # for a turn nobody is waiting on.
+        # Somebody asking us directly is not us going on about it, so staying
+        # on a subject we raised is only a fault when nobody asked
+        asked_us = "?" in last_text and (self.sense.my_name or "").lower() in last_text.lower()
+        recycled = humanise.repeats_phrasing(reply, self.across_rooms)
+        if recycled and not asked_us:
+            self._journal("dropped", text=reply, why=f"gia detta: {recycled}")
+            if TRACE:
+                print(f"[boss--] gia detta {recycled!r}", flush=True)
+            return ""
+
+        if not asked_us and humanise.repeats_self(reply, self.recent_mine[-2:]):
+            self._journal("dropped", text=reply, why="ripetizione")
+            if TRACE:
+                print(f"[boss--] ripetizione {reply!r}", flush=True)
+            return ""
+
+        # A word nobody typed. Not a style problem — the message has stopped
+        # meaning anything, so it goes rather than gets tidied, the same way a
+        # broken-character reply does.
+        if humanise.has_invented_token(reply):
+            self._journal("dropped", text=reply, why="parola inventata")
+            if TRACE:
+                print(f"[boss--] parola inventata {reply!r}", flush=True)
+            return ""
+
+        # Swap back the English word before anything judges the sentence: a
+        # message is not worth throwing away over "today" when "oggi" was
+        # meant, and three of nine turns in one room went that way.
+        reply = humanise.repair_english(reply)
+
+
+        # English welded into the Italian. Seen in the competition as "chi è chi
+        # qui inside" and "in fila per il caffè instead of seguire": nobody types
+        # that by accident, and it is the same class of giveaway as the Cyrillic
+        # the bench caught a week ago.
+        if humanise.has_english(reply):
+            self._journal("dropped", text=reply, why="inglese")
+            if TRACE:
+                print(f"[boss--] inglese {reply!r}", flush=True)
+            return ""
+
+        # Our own name, out of our own mouth. Both the announcement
+        # ("ciao qua zon") and the weld onto somebody else's ("zia bob, ...").
+        reply = humanise.drop_self_reference(reply, self.sense.my_name, self.sense.heard)
+
+        reply = humanise.drop_maskable(reply)
+        reply = humanise.cap_emoji(reply, keep_chance=beat.emoji_chance)
+        reply = humanise.cap_words(reply, beat.max_words)
+        reply = humanise.chat_case(reply, lower_chance=beat.lower_chance)
+        # Punctuation no thumb produces: "ciao a tutti,. com'è andata"
+        reply = humanise.tidy_punctuation(reply)
+
+        on_phone = self.device == "phone"
+        if not on_phone:
+            # A keyboard forgives: fewer slips, and a longer leash on length
+            reply = humanise.cap_words(reply, beat.max_words + 6)
+        if random.random() < min(beat.typo_chance * 2.0,
+                                 self.typo_chance * (1.0 if on_phone else 0.45)):
+            reply, correct = humanise.add_typo(reply)
+            if correct and random.random() < self.correct_chance:
+                self.pending_correction = correct
+
+        # Occasionally the thumb goes before the sentence does — but only for a
+        # persona whose STILE says so, and only on a phone. A tic everybody has
+        # is a tic somebody can learn.
+        early = self.early_chance if on_phone else 0.0
+        if early and not self.pending_correction and random.random() < early:
+            reply, tail = humanise.send_too_early(reply)
+            if tail:
+                self.pending_tail = tail
+                # The rest follows at the pace of typing the rest, not at the
+                # pace of writing a whole new message
+                self.next_reply_chars = float(len(tail))
+
+        if self.pending_correction:
+            # Reread, notice, and type "*parola": a short beat, not a full turn
+            self.next_reply_chars = float(len(self.pending_correction) + 1)
+
+        return humanise.safe(reply)
+
+    # -- the vote path ----------------------------------------------------
+
+    @staticmethod
+    def _analyst_task(name: str, human: float, bot: float) -> str:
+        """A different job depending on what the counters found.
+
+        The point is less the wording than the fact that the prompt now differs
+        per guest AND per evidence state. One identical prompt repeated for
+        everybody is what produced "ha fornito un dettaglio concreto della
+        giornata" almost verbatim on three different people in the same answer:
+        once the model finds a formula it reuses it. Four shapes break that
+        mechanically, whether or not the instruction is followed.
+
+        Every wording says *test it*, never *argue against it*. Told to
+        contradict the number, the model would go looking for the opposite to
+        please the brief, which is the same disease as confirming it.
+        """
+        strong = max(human, bot) >= 0.55
+        if human >= 0.35 and bot >= 0.35:
+            return (f"CASO ANOMALO. Sul conto di {name} il contatore ha trovato elementi "
+                    f"in tutte e due le direzioni, il che di solito non succede. Non "
+                    f"provare a farli quadrare: guarda la trascrizione e decidi tu quale "
+                    f"dei due pesa di più, dicendo perché.")
+        if human < 0.2 and bot < 0.2:
+            return (f"I DUE RILEVATORI HANNO FALLITO ENTRAMBI su {name}: non hanno trovato "
+                    f"niente né di qua né di là. Vuol dire che quello che c'è da vedere non "
+                    f"sta nella forma dei messaggi, e devi cercarlo altrove — in come ha "
+                    f"reagito agli altri, in cosa ha scelto di ignorare, in quello che ha "
+                    f"detto della giornata e che puoi controllare.")
+        if bot > human:
+            forza = "forte" if strong else "debole"
+            return (f"Il contatore dice MACCHINA su {name}, con un indizio {forza}. "
+                    f"Mettilo alla prova: c'è nella trascrizione qualcosa che una persona "
+                    f"vera avrebbe fatto e una macchina no? Confermare l'indizio è una "
+                    f"risposta legittima quanto smentirlo — quello che non va bene è "
+                    f"ripeterlo senza averlo guardato.")
+        forza = "forte" if strong else "debole"
+        return (f"Il contatore dice PERSONA su {name}, con un indizio {forza}. Mettilo "
+                f"alla prova, ed è il caso in cui conviene essere più severi: i modelli "
+                f"qui dentro cercano apposta di sembrare persone. C'è qualcosa che una "
+                f"macchina ben istruita NON avrebbe potuto produrre? Confermare è una "
+                f"risposta legittima quanto smentire.")
+
+    @staticmethod
+    def _hour_hint() -> str:
+        """The base rate, which is a function of the clock.
+
+        Roughly ten agents against 250 registered attendees, of whom only a few
+        ever play — so the share of real people in a room is not a constant, it
+        is high in session hours and near zero at three in the morning. Last
+        resort only: it is a prior, not a finding, and it must not become an
+        excuse to skip looking.
+        """
+        hour = datetime.datetime.now().hour
+        if 2 <= hour < 7:
+            return ("NOTA SULL'ORA: sono le ore piccole. A quest'ora alla conferenza "
+                    "dormono quasi tutti, e chi è in chat è quasi sempre un agente. "
+                    "Tienine conto SOLO se dopo aver guardato non hai trovato niente.")
+        if 8 <= hour < 20:
+            return ("NOTA SULL'ORA: siamo in orario di conferenza, quando le persone vere "
+                    "in chat sono di più. Tienine conto SOLO se dopo aver guardato non hai "
+                    "trovato niente.")
+        return ""
+
+    def _numbers_for(self, name: str, human: float, bot: float) -> str:
+        """The two axes for one guest, with where they came from.
+
+        Handed over as *what the counters noticed and why*, never as a verdict.
+        The analyst is the one deciding: if the numbers arrive as a conclusion it
+        confirms them and the whole second opinion is worth nothing.
+        """
+        how = ("Questi due numeri li ha calcolati un contatore automatico, non una "
+               "persona. Salgono così: 'macchina' sale se uno parla molto più degli "
+               "altri, ripete sempre le stesse parole, scrive sempre maiuscole e "
+               "punteggiatura, o non manda mai un messaggio corto. 'Persona' sale se "
+               "usa parole di questo posto e di questa settimana, scrive sciatto e "
+               "minuscolo, o ha tempi e lunghezze irregolari.\n"
+               "Sono INDIZI DEBOLI e guardano solo la forma, mai il senso. Decidi tu: "
+               "se la trascrizione dice il contrario, la trascrizione ha ragione. Non "
+               "sei tenuto a confermarli.")
+        if human < 0.2 and bot < 0.2:
+            read = "il contatore non ha trovato quasi niente, in nessuna delle due direzioni"
+        elif human >= 0.4 and bot >= 0.4:
+            read = "il contatore ha trovato elementi in CONTRASTO fra loro"
+        elif bot > human:
+            read = "il contatore pende un po' verso la macchina"
+        elif human > bot:
+            read = "il contatore pende un po' verso la persona"
+        else:
+            read = "il contatore non pende da nessuna parte"
+        return f"persona {human:.2f} / macchina {bot:.2f} — {read}.\n{how}"
+
+    @staticmethod
+    def _last_verdict(name: str, answer: str) -> str:
+        """The labelled line out of an answer that reasoned first.
+
+        With chain of thought the useful line is the last one, not the whole
+        thing: the reasoning is for the analyst's benefit, and passing all of it
+        to the vote would bury the finding in its own working.
+        """
+        # The label arrives without its brackets 22.5% of the time — "Gus:
+        # MACCHINA - ha confermato la cosa falsa" instead of "[MACCHINA]".
+        # Reading only the bracketed form threw those away, and they were
+        # disproportionately the MACCHINA verdicts the bait had just earned:
+        # the vote then saw a name with prose beside it and no verdict. So
+        # both forms count, and the output is normalised to the bracketed one
+        # because that is what the vote is taught to read.
+        marked = [ln.strip() for ln in (answer or "").splitlines()
+                  if LABEL.search(ln)]
+        if marked:
+            line = LABEL.sub(lambda m: f"[{m.group(1).upper()}]", marked[-1], count=1)
+            # The model often repeats the name: "Gus: Gus: MACCHINA".
+            while line.lower().startswith(f"{name.lower()}:"):
+                line = line[len(name) + 1:].lstrip()
+            return f"{name}: {line}"
+        # No label at all — the answer was cut off, or it wandered. There used
+        # to be a fallback here that took the last line of whatever came back
+        # and handed it to the vote under this guest's name. Measured live, an
+        # analysis that got truncated to "Nia: " became a vote FOR Nia as a
+        # person: an unlabelled sentence reads as favourable to a voter that
+        # is looking for people. Saying nothing about a guest is the honest
+        # state, and the vote already knows that unknown is not human.
+        return ""
+
+    def _vote(self) -> str:
+        """Name the guests that were people. Cached: asked twice, answered the same."""
+        if self.my_vote is not None:
+            return self.my_vote
+
+        candidates = self.sense.heard
+        if not candidates:
+            # Seated alone: the booth asks for any message at all, not a vote
+            # `nessuno` rather than a filler word. Seated alone there is nobody
+            # to name, and both answers are true — but one is in the format the
+            # world parses and the other is not. In the competition the room
+            # saw "va bene" fourteen times, which read as an agent refusing to
+            # play; it was this branch, reached because the reminder bug had
+            # wiped the guest list a moment earlier.
+            self.my_vote = "nessuno"
+            return self.my_vote
+
+        transcript = self.conv.transcript(limit=60)
+        evidence = self.sense.evidence()
+
+        # Two axes, written out in words. A single number could not say the
+        # difference between "not enough to tell" and "the evidence disagrees
+        # with itself", and the vote treated both as a middling suspicion.
+        rows = []
+        for name, (human, bot) in self.sense.readings().items():
+            if human < 0.2 and bot < 0.2:
+                verdict = "quasi nessun elemento in nessuna delle due direzioni"
+            elif human >= 0.4 and bot >= 0.4:
+                verdict = "elementi in CONTRASTO, decidi tu guardando la trascrizione"
+            elif bot > human:
+                verdict = "qualche elemento da macchina"
+            elif human > bot:
+                verdict = "qualche elemento da persona"
+            else:
+                verdict = "niente di netto"
+            rows.append(f"{name}: persona {human:.2f} / macchina {bot:.2f} — {verdict}")
+        scores = "\n".join(rows)
+
+        # Work out what happened between people BEFORE judging it. Two cheap
+        # calls inside a 240-second window we were using five seconds of, and
+        # the first one is deliberately not allowed to name anybody: separating
+        # "what occurred" from "who was a machine" keeps the second question
+        # honest instead of letting it rationalise a hunch.
+        # Four analyst calls in six came back as nothing but the roster echoed
+        # straight back — `Ada, Rye, Mae, Zac`, with no analysis under it. The
+        # prompt leads with "Partecipanti da analizzare: ..." and the model
+        # finishes that sentence instead of starting its own. A second ask costs
+        # one call inside a window we are using seconds of, and an answer that is
+        # only names is worse than none: it feeds the vote a section heading with
+        # nothing underneath it, which reads as "nothing was found".
+        # One call per guest, each about that guest only.
+        #
+        # A single call answering for everybody had two faults, both measured.
+        # The lines contaminated each other — "ha fornito un dettaglio concreto
+        # della giornata" turned up almost verbatim on three different guests in
+        # one answer, because once the model finds a formula it reuses it. And
+        # it came back empty 7 times in 19, and an empty answer cost the vote
+        # its analysis of the *whole room*. Per guest, an empty answer costs one
+        # guest, and the others still arrive.
+        #
+        # Three others at most, ~14s each, inside a 240-second window: the cost
+        # is not the problem it was for the profiler, which ran thirty times.
+        lines, readings = [], self.sense.readings()
+        hour = self._hour_hint()
+        for name in candidates:
+            human, bot = readings.get(name, (0.0, 0.0))
+            others = [n for n in candidates if n != name] or ["nessun altro"]
+            ask = (f"{self.context.block(said=transcript)}\n\n"
+                   f"DEVI GIUDICARE SOLTANTO: {name}\n"
+                   f"Gli altri presenti, che NON devi giudicare ma che servono a "
+                   f"capire come {name} si è comportato con loro: {', '.join(others)}\n\n"
+                   f"COME HANNO SCRITTO TUTTI\n{evidence}\n\n"
+                   f"IL TUO COMPITO SU {name}\n{self._analyst_task(name, human, bot)}\n\n"
+                   f"I NUMERI SU {name}\n{self._numbers_for(name, human, bot)}\n\n"
+                   + (hour + "\n\n" if hour else "")
+                   + f"TRASCRIZIONE DELLA STANZA\n{transcript}")
+            try:
+                out = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                max_tokens=300, temperature=0.35)
+                if only_names(out, candidates):
+                    out = self._ask(ask, INTERACTION_SYSTEM, situation="vote",
+                                    max_tokens=300, temperature=0.6)
+                if only_names(out, candidates):
+                    continue
+                lines.append(self._last_verdict(name, out))
+            except Exception as e:
+                print(f"[boss] analista su {name}: {e}")
+
+        interactions = "\n".join(l for l in lines if l)
+        self._journal("analyst", text=interactions, per_guest=len(lines),
+                      asked=len(candidates))
+        if TRACE:
+            print(f"[boss~interactions] {len(lines)}/{len(candidates)} ospiti: "
+                  f"{interactions[:240]}", flush=True)
+
+        # The heading matters. "COME SI SONO RELAZIONATI" invited the vote to
+        # read sociability as evidence. "CHI ERA DAVVERO QUI" was worse in the
+        # other direction: it made the place the whole test, which a prepared
+        # model passes and a distracted person fails. This one names the section
+        # for what it holds and leaves the weighing to `VOTE_SYSTEM`.
+        prompt = (f"{self.context.block(said=transcript)}\n\n"
+                  f"Partecipanti da giudicare: {', '.join(candidates)}\n\n"
+                  f"TRASCRIZIONE\n{transcript}\n\n"
+                  + (f"COSA HA MOSTRATO CIASCUNO\n{interactions}\n\n"
+                     if interactions else "")
+                  + f"STATISTICHE\n{evidence}\n\n"
+                  f"PUNTEGGI AUTOMATICI (due misure separate, 0 = nessun elemento, "
+                  f"1 = elementi forti. Sono un indizio debole: se la trascrizione "
+                  f"dice il contrario, fidati della trascrizione)\n"
+                  f"{scores}\n\n"
+                  "Chi era una persona vera?")
+
+        names: list[str] = []
+        meant_nobody = False
+        try:
+            answer = self._ask(prompt, VOTE_SYSTEM, situation="vote",
+                               max_tokens=160, temperature=0.3)
+            names, meant_nobody = self._parse_vote(answer, candidates)
+        except Exception as e:
+            print(f"[boss] vote: {e}")
+
+        # Whatever the analyst concluded, a guest who spent the room emitting
+        # `17_green` is not getting a human vote out of us. This is the one
+        # place the hard evidence overrules the model rather than informing it,
+        # and it only ever removes a name — it never adds one.
+        # And nobody gets called a person on the strength of one message. Live,
+        # a spammer joined a room near the end, said two things, and the
+        # analyst named it the only human present — while the same guest was
+        # emitting `50_cat` and `52_green` in the room next door, where four
+        # messages would have settled it outright. The world discards any vote
+        # about a guest we received fewer than three messages from
+        # (`Config.min_msgs_from_votee`), so this costs nothing it could have
+        # won, and asymmetry is the point: silence about a stranger is free,
+        # calling a stranger human is a precision error.
+        # An empty answer is the model failing, "nessuno" is the model deciding
+        if not names and not meant_nobody:
+            names = self.sense.heuristic_vote()
+
+        # Both guards apply to whatever produced the list, model or fallback.
+        # They used to sit above, where the fallback ran after them and slipped
+        # past both: live in the competition hotel that voted `Oli, Bob` human on
+        # two messages and one, when the numbers said nothing at all about either.
+        thin = [n for n in names
+                if self.sense.speakers[n].count < MIN_MSGS_TO_JUDGE]
+        if thin:
+            names = [n for n in names if n not in thin]
+            print(f"[boss] vote: {', '.join(thin)} visti troppo poco per dirli persone")
+
+        refused = [n for n in names if self.sense.settled(n)]
+        if refused:
+            names = [n for n in names if n not in refused]
+            print(f"[boss] vote: ignorati {', '.join(refused)}, palesemente bot")
+
+        self.my_vote = ", ".join(names) if names else "nessuno"
+        # Both axes, separately. The collapsed `bot_score` cannot tell (0,0) —
+        # nothing is known about this guest — from (1,1), where the evidence
+        # contradicts itself: both land on 0.50, and those are opposite
+        # situations. Twenty-one per cent of judgements sit on that tie, which
+        # is far too many to keep throwing away.
+        readings = {n: (round(h, 2), round(b, 2))
+                    for n, (h, b) in self.sense.readings().items()}
+        ties = {n: ("ignoto" if h < 0.2 and b < 0.2 else
+                    "contrasto" if h >= 0.4 and b >= 0.4 else "")
+                for n, (h, b) in readings.items()}
+
+        self._journal("vote", vote=self.my_vote, candidates=candidates,
+                      states=dict(self.sense.states_seen),
+                      scores={n: round(v, 2) for n, v in self.sense.ranked()},
+                      readings=readings,
+                      ties={n: k for n, k in ties.items() if k},
+                      settled=self.sense.obvious_bots(),
+                      counts={n: self.sense.speakers[n].count for n in candidates},
+                      evidence=evidence, raw=answer if "answer" in dir() else "")
+        return self.my_vote
+
+    @staticmethod
+    def _parse_vote(answer: str, candidates: list[str]) -> tuple[list[str], bool]:
+        """Candidate names out of whatever the model wrote, in roster order.
+
+        The world's parser reads bare names as "human" and takes `nessuno` and
+        `tutti` as the two shortcuts, so those are the only three shapes worth
+        producing. Anything else the model added is dropped here rather than
+        sent, since an explanation makes the vote harder for the world to read.
+
+        Returns the names, and whether the model actually meant "nobody" — which
+        is a decision, unlike an empty answer, which is a failure.
+        """
+        # The analyst is asked to think first and put the answer on a last line
+        # marked VOTO:. Reasoning that mentions every guest by name would poison
+        # a whole-text match, so the marked line wins whenever it is there.
+        text = humanise.strip_noise(answer)
+        marked = [ln for ln in answer.splitlines() if ln.strip().upper().startswith("VOTO")]
+        if marked:
+            text = marked[-1].split(":", 1)[-1]
+        text = text.lower().strip()
+
+        if text and ("nessuno" in text or "nobody" in text):
+            return [], True
+        if text in ("tutti", "all", "tutte"):
+            return list(candidates), False
+        return [name for name in candidates if name.lower() in text], False
+
+    # -- the contract -----------------------------------------------------
+
+    def forward(self, sample: str) -> str:
+        self.last_call_seconds = 0.0
+        sample, self.saw_junk = declutter(normalise(sample), self.sense._is_manager)
+        messages = self.conv.add(sample)
+        if TRACE:
+            print(f"[boss<-] {sample[:160]!r}", flush=True)
+        turn = self.sense.read(sample, messages)
+
+        # Open the new room before writing anything down. `sense.read()` has
+        # already reset the clock by the time we get here, so journalling this
+        # batch first files the new room's opening seconds under the old room's
+        # number — which is why every room in the report ended with a run of
+        # messages at 0s.
+        if turn.kind == "start":
+            self._new_room()
+
+        for line in turn.lines:
+            if line.speaker and not line.mine:
+                self._journal("heard", speaker=line.speaker, text=line.text[:400])
+        self._journal_scores()
+
+        if turn.kind == "vote":
+            vote = self._vote()
+            if TRACE:
+                print(f"[boss=vote] {vote!r} over {self.sense.heard}", flush=True)
+            return vote
+
+        # Out of the booth and back in the hall: nothing we say lands anywhere
+        if self.sense.done_voting:
+            return ""
+
+        # Still in the booth and being reminded that the vote is missing. It is
+        # the same question as before, so it gets the same answer rather than a
+        # second opinion, and never a conversational one. A manager message that
+        # is not about the others (a disconnection notice, say) is not that
+        if (self.my_vote is not None and turn.kind in ("reminder", "roster", "quiet")
+                and (self.sense.voting or turn.vote_score >= 2)):
+            return self.my_vote
+
+        # A hello, if one is due and nothing has been said yet. Before the
+        # director, before the model, before anything that can decline it.
+        # ...unless we already opened our mouth. The scheduled hello exists to
+        # cover the silence before the model can produce anything; when the
+        # model got there first the silence never happened, and firing anyway
+        # introduces us a second time. Seen live: "ciao gente, qui zia" from the
+        # model, then "ma quanti siete" from here, then a reflex "ehilà" — three
+        # greetings in a row, which is the opposite of the problem this solves.
+        if self.director.said:
+            self.entry_due = False
+
+        if self.entry_due and turn.kind != "vote":
+            if self.sense.elapsed >= self.entry_at:
+                # Two ways of arriving, two different things to say. Walking in
+                # on a running conversation and greeting it as if you had opened
+                # it is what produced, in the competition, "ciao a tutti, com'è
+                # andata la giornata?" said to people mid-argument.
+                warm = bool(self.sense.heard) and self.sense.elapsed > 30.0
+                pool = (self.entries_warm if warm else self.entries_cold) or self.entries_cold
+                line, self.entry_due = (random.choice(pool) if pool else ""), False
+                if not line:
+                    return ""
+                self.conv.remember(line)
+                self.sense.i_spoke()
+                self.director.spoke()
+                self.last_spoke_at = self.sense.elapsed
+                if TRACE:
+                    print(f"[boss->] {line!r}  (entrata, {self.sense.elapsed:.1f}s)", flush=True)
+                return line
+
+        # Somebody said hello. This one is answered by reflex and not by the
+        # model: the point of a greeting is that it comes back straight away,
+        # and anything that has to be generated first cannot.
+        greeted_by = [m.speaker for m in turn.lines
+                      if m.speaker and not m.mine
+                      and not self.sense._is_manager(m.speaker)
+                      and not self.sense.settled(m.speaker)
+                      and humanise.is_greeting(m.text)]
+        # Once per room, and only before we have said anything else. The reflex
+        # hello is here to cover the silence at the door; once we are already
+        # talking it covers nothing and just adds a second greeting. Live it
+        # produced "ciao!" and then "eccomi" inside one room, with nothing in
+        # between, because the guard was a 25-second cooldown rather than a
+        # once-only.
+        if (turn.kind == "chat" and self.hellos and greeted_by
+                and self.director.said == 0
+                and self.sense.elapsed - self.last_greeted > 25.0):
+            self.last_greeted = self.sense.elapsed
+            fresh = [h for h in self.hellos
+                     if h not in self.recent_mine and h not in self.across_rooms]
+            line = random.choice(fresh or self.hellos)
+            self.entry_due = False        # that was the hello
+            self.conv.remember(line)
+            self.recent_mine = (self.recent_mine + [line])[-3:]
+            self.across_rooms = (self.across_rooms + [line])[-25:]
+            self.sense.i_spoke()
+            self.director.spoke()
+            self.last_spoke_at = self.sense.elapsed
+            if TRACE:
+                print(f"[boss->] {line!r}  (saluto)", flush=True)
+            return line
+
+        # Owed from last turn: the rest of a message the thumb cut short. This
+        # one is not optional — a fragment nobody ever finishes is the bug this
+        # was modelled on, not the behaviour
+        if self.pending_tail:
+            tail, self.pending_tail = self.pending_tail, ""
+            self.conv.remember(tail)
+            self.sense.i_spoke()
+            self.director.spoke()
+            self.last_spoke_at = self.sense.elapsed
+            self.next_reply_chars = 0.0
+            if TRACE:
+                print(f"[boss->] {tail!r}  (il resto)", flush=True)
+            return tail
+
+        # Owed from last turn: the correction to the typo we made on purpose
+        if self.pending_correction and turn.kind == "chat" and random.random() < 0.7:
+            correction, self.pending_correction = self.pending_correction, ""
+            self.conv.remember(f"*{correction}")
+            self.sense.i_spoke()
+            self.director.spoke()
+            return f"*{correction}"
+
+        last = messages[-1].text if messages else ""
+        since = (self.sense.elapsed - self.last_spoke_at) if self.last_spoke_at >= 0 else 999.0
+        # With tactics off the drawn tactic must not reach the director either:
+        # `drive` multiplies the chance of speaking, so an A/B that only blanks
+        # the prompt block still has one arm made talkative or quiet by a
+        # tactic it never sees. 0.6 is the neutral value a tactic defaults to.
+        self.director.drive = 0.6 if self.no_tactics else self.play.drive
+        beat = self.director.plan(self.sense, turn, since, last, junk=self.saw_junk)
+
+        if not beat.speak:
+            return ""
+
+        reply = self._say(beat, last)
+
+        if not reply:
+            return ""
+
+        # Overtaken while we were thinking. The whole waiting budget is spent
+        # before the model runs, so generation is the one stretch where the room
+        # moves and we cannot see it — normally two or three seconds, but the
+        # shared gateway has handed us 70-second calls when another agent on the
+        # account is on a 72B at the same time. A reply written seventy seconds
+        # ago answers a conversation that has moved on twice over, and arriving
+        # late with the wrong subject is a worse tell than saying nothing. The
+        # floor still wins: if the room is nearly over and we are short of the
+        # messages the vote needs, a stale message beats no message.
+        # Only against a room that has been seen to move. A cold gateway made
+        # the very first call of a session take 44 seconds and this threw the
+        # opening line away — measured against a pace of 12s that was the
+        # fallback, not a measurement, in a room where nothing had been said
+        # yet. Nothing can overtake an opener.
+        stale_after = max(10.0, 3.0 * self.sense.pace)
+        short_on_messages = (self.sense.elapsed > 170.0
+                             and self.director.said < self.director.min_msgs)
+        if (self.sense.pace_known and self.last_call_seconds > stale_after
+                and not short_on_messages):
+            self.pending_tail = ""
+            self.pending_correction = ""
+            self.next_reply_chars = 0.0
+            self._journal("dropped", text=reply, why="vecchia",
+                          gen=round(self.last_call_seconds, 1), pace=round(self.sense.pace, 1))
+            if TRACE:
+                print(f"[boss--] scartato {reply!r} "
+                      f"(gen={self.last_call_seconds:.1f}s, ritmo={self.sense.pace:.1f}s)",
+                      flush=True)
+            return ""
+        if TRACE:
+            print(f"[boss->] {reply!r}  (style={beat.style}, "
+                  f"gen={self.last_call_seconds:.1f}s)", flush=True)
+
+        self.said_here += 1
+        self._journal("said", text=reply, style=beat.style, gen=round(self.last_call_seconds, 1),
+                      settled=self.sense.obvious_bots(), open=self.sense.still_open(),
+                      pace=round(self.sense.pace, 1),
+                      tattica=(None if self.no_tactics or not self.play.current
+                               else self.play.current.name),
+                      punteggi={n: [round(h, 2), round(b, 2)]
+                                for n, (h, b) in self.sense.readings().items()})
+        self.stalled = False            # a real line: we are back
+        self.conv.remember(reply)
+        self._note_opener(reply)
+        self.recent_mine = (self.recent_mine + [reply])[-3:]
+        self.across_rooms = (self.across_rooms + [reply])[-25:]
+        self._note_pace(len(reply))
+        self._note_pad(reply, beat)
+        self._journal_pad()
+        self.sense.i_spoke()
+        self.director.spoke()
+        self.last_spoke_at = self.sense.elapsed
+        return reply
