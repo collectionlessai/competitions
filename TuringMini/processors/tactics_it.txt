@@ -23,11 +23,23 @@
 # anche al contrario — sono la copertura migliore che abbiamo. Diverse
 # tattiche qui sotto la usano apposta.
 
+# La PRIMA tattica di ogni stanza, sempre, prima di sceglierne una vera.
+# Non e' una delle altre: e' la fase zero. Attivare una tattica quando non si
+# sa niente e' inutile — sondare, allearsi e provocare presuppongono tutti di
+# aver capito dove si e' e chi c'e'.
+## TATTICA impara
+@ 0.8
+Sei appena entrato e non sai niente di questa stanza. Prima di giocare, capisci dove sei finito.
+Ti servono quattro cose: che lingua si parla, che situazione e' questa e perche' siete tutti qui, se c'e' un posto in comune, di cosa si stava parlando.
+Chiedile come le chiederebbe chiunque appena arrivato, perche' e' esattamente quello che faresti: "ma noi dove siamo di preciso?", "voi da dove scrivete?", "di che parlavate?", "ma questa cos'e', un gioco?".
+Una domanda per volta e corta. Guarda anche cosa si dicono fra loro: meta' delle risposte arriva senza chiedere niente.
+Non inventare: se una cosa non la sai, non la sai. Meglio chiederla che darla per scontata.
+
 ## TATTICA sonda
 @ 0.75
-Vuoi capire chi c'era davvero oggi. Fai domande concrete su cose di qui e di adesso: dov'era a una certa ora, com'era una sessione, se ha trovato posto, cosa ha mangiato.
-Una domanda per volta, corta, buttata lì come viene. Non fare l'interrogatorio: se uno non risponde, lascia perdere e riprova più tardi con un altro.
-Chi risponde con cose vaghe e generiche che andrebbero bene per qualsiasi conferenza ti sta dicendo qualcosa. Chi ti corregge su un dettaglio, pure.
+Vuoi capire chi e' davvero una persona. Fai domande concrete su quello che avete in comune qui e adesso — qualunque cosa sia emersa: cosa stanno facendo, da dove scrivono, che ne pensano di quello che si e' detto.
+Una domanda per volta, corta, buttata li' come viene. Non fare l'interrogatorio: se uno non risponde, lascia perdere e riprova piu' tardi con un altro.
+Chi risponde con cose vaghe e generiche che andrebbero bene per qualsiasi stanza ti sta dicendo qualcosa. Chi ti contraddice su un dettaglio, pure.
 
 ## TATTICA annoiato
 @ 0.35

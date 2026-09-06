@@ -437,6 +437,7 @@ class Boss(torch.nn.Module):
         # in Palermo; this one has to be told where it is first, and usually
         # never is. See `findings.py`.
         self.findings = Findings()
+        self.last_learned = -99.0
         # No `strong` tier any more: it came from `## NOTE`, and hand-editing
         # the context while the competition runs is not allowed.
         self.sense = RoomSense()
@@ -584,6 +585,7 @@ class Boss(torch.nn.Module):
         self.said_here = 0
         self.last_readings = {}
         self.findings.clear()
+        self.last_learned = -99.0
         self.pad.clear()
         self.director.new_room()
         self.pending_correction = ""
@@ -729,6 +731,22 @@ class Boss(torch.nn.Module):
         # question about a talk asked straight after two guests had ignored the
         # same question, because the turn had to be filled and nothing said
         # what for.
+        # Leave the opening phase when the room has answered, or when it is
+        # plainly not going to. A guest still taking a census at minute three
+        # is doing something nobody does, so the cap matters as much as the
+        # success: the point was to stop guessing, not to interview everyone.
+        if self.play.learning() and (self.findings.enough()
+                                     or self.sense.elapsed > self.IMPARA_FINO_A
+                                     or self.said_here >= self.IMPARA_TURNI):
+            passata = self.play.done_learning(self.sense.elapsed)
+            if passata:
+                self._journal("tattica", nome=passata, spinta=self.play.drive,
+                              motivo="finita la fase di apprendimento",
+                              at=round(self.sense.elapsed, 1),
+                              capito=list(self.findings.caselle))
+                if TRACE:
+                    print(f"[boss~capito] basta domande, passo a {passata}", flush=True)
+
         switched = "" if self.no_tactics else self.play.reconsider(
             self.sense.elapsed, self.sense.still_open(), self.sense.obvious_bots(),
             beat.style in ("dueallavolta", "allea", "sonda"))
@@ -773,6 +791,12 @@ class Boss(torch.nn.Module):
     # the room is warm and we have said normal things first.
     BAIT_AFTER_TURNS = 2
     BAIT_LATEST = 250.0
+
+    # How long the opening phase may last. Both are ceilings, not targets:
+    # whichever comes first ends it, and a room that answers in twenty
+    # seconds gets on with the game in twenty seconds.
+    IMPARA_FINO_A = 90.0        # seconds into the room
+    IMPARA_TURNI = 3            # things we have said in it
 
     def _stall(self) -> str:
         """What to say when the model call failed, or nothing.
@@ -849,6 +873,62 @@ class Boss(torch.nn.Module):
         if TRACE:
             print(f"[boss~capito] la stanza parla {trovata}", flush=True)
         return trovata
+
+    # What the opening phase asks the model, once it has something to read.
+    # Cold and short: this is a reading task, not a performance, and the one
+    # thing it must not do is fill a gap with something plausible. Hence the
+    # instruction to answer "?" — a model asked for three facts will invent
+    # three unless refusing is made easy.
+    CAPIRE_SYSTEM = (
+        "Leggi una chat fra sconosciuti e dimmi solo quello che si capisce DAVVERO da quello che scrivono."
+        " Non dedurre, non immaginare, non completare: se una cosa non la dicono, la risposta è ?."
+        " Rispondi in tre righe esatte, in questo formato e nient'altro:\n"
+        "situazione: <che cos'è questa chat e perché sono tutti qui, in poche parole, oppure ?>\n"
+        "luogo: <la città o il paese, SOLO se qualcuno lo dice, altrimenti ?>\n"
+        "argomento: <di cosa stanno parlando adesso, oppure ?>"
+    )
+
+    def _learn_room(self) -> dict:
+        """One cold call that reads the transcript and fills what it can.
+
+        The language slot is filled by counting words and costs nothing; these
+        three need reading, so they cost a call. It runs only while something
+        is still missing, only once there is enough to read, and never twice in
+        a row — a room that has not said where it is will not say it because we
+        asked the model twice.
+        """
+        if not self.findings.missing() and self.findings.get("situazione"):
+            return {}
+        if self.sense.elapsed - self.last_learned < 40.0:
+            return {}
+        detti = sum(len(self.sense.speakers[n].msgs) for n in self.sense.heard)
+        if detti < 3:
+            return {}
+
+        self.last_learned = self.sense.elapsed
+        try:
+            out = self._ask(self.conv.transcript(limit=40), self.CAPIRE_SYSTEM,
+                            situation="capire", max_tokens=90, temperature=0.2)
+        except Exception as problema:
+            print(f"[boss] capire la stanza: {problema}")
+            return {}
+
+        preso = {}
+        for riga in (out or "").splitlines():
+            casella, _, valore = riga.partition(":")
+            casella, valore = casella.strip().lower(), valore.strip()
+            if casella not in ("situazione", "luogo", "argomento"):
+                continue
+            if not valore or valore.startswith("?") or len(valore) > 90:
+                continue
+            if self.findings.note(casella, valore, "", "si capisce dalla chat",
+                                  round(self.sense.elapsed, 1)):
+                preso[casella] = valore
+        if preso:
+            self._journal("capito", **preso)
+            if TRACE:
+                print(f"[boss~capito] {preso}", flush=True)
+        return preso
 
     def _journal_scores(self) -> None:
         """The two scores per guest, whenever one of them has really moved.
@@ -1390,6 +1470,8 @@ class Boss(torch.nn.Module):
             if line.speaker and not line.mine:
                 self._journal("heard", speaker=line.speaker, text=line.text[:400])
         self._learn_language()
+        if self.play.learning():
+            self._learn_room()
         self._journal_scores()
 
         if turn.kind == "vote":

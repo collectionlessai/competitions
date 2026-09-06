@@ -84,10 +84,39 @@ class Playbook:
         self.since = 0.0
         self.switched = 0
 
+    # The tactic every room opens on, before a real one is drawn. Not one of
+    # the seven: the phase before them. Probing, allying and provoking all
+    # assume you have worked out where you are and who is here, and running
+    # one of them on an empty head produces the confident nonsense this
+    # version exists to avoid.
+    PRIMA = "impara"
+
     def new_room(self, when: float = 0.0) -> None:
-        self.current = random.choice(self.tactics) if self.tactics else None
         self.since = when
         self.switched = 0
+        self.current = self._by_name(self.PRIMA) or (
+            random.choice(self.tactics) if self.tactics else None)
+
+    def _by_name(self, name: str):
+        for tactic in self.tactics:
+            if tactic.name == name:
+                return tactic
+        return None
+
+    def learning(self) -> bool:
+        """Whether we are still in the opening phase."""
+        return bool(self.current) and self.current.name == self.PRIMA
+
+    def done_learning(self, when: float) -> str:
+        """Leave the opening phase for a real tactic, drawn at random."""
+        if not self.learning():
+            return ""
+        vere = [t for t in self.tactics if t.name != self.PRIMA]
+        if not vere:
+            return ""
+        self.current = random.choice(vere)
+        self.since = when
+        return self.current.name
 
     def pick(self, name: str) -> None:
         for tactic in self.tactics:
