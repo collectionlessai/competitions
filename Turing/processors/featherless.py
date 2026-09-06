@@ -39,10 +39,19 @@ from unaiverse.modules.networks import FeatherlessAPI
 from unaiverse.modules.utils import APIGatewayServer
 
 # What the gateway charges per call, by model size. The accepted values are
-# 1, 2 and 4, and the number has to match the model actually asked for
-COSTS = ((re.compile(r"\b(?:65|70|72|8x22|120|180|235|405)b\b", re.IGNORECASE), 4),
+# 1, 2 and 4, and the number has to match the model actually asked for.
+#
+# Ranges rather than a list of sizes, because the list had holes and a hole is
+# not free: `gemma-4-31B` fell through to 1 unit because 31 was missing between
+# 30 and 32, and a price set too low makes the gateway over-schedule the model
+# — which is how the account ends up asking Featherless for more units than the
+# plan has and collecting 429s. The server's own refusal quotes the real
+# numbers ("Model concurrency cost: 4 units per request" for a 72B), so those
+# are what these have to match.
+COSTS = ((re.compile(r"\b(?:6[0-9]|7[0-9]|8[0-9]|9[0-9]|8x22|"
+                     r"1[0-9]{2}|2[0-9]{2}|3[0-9]{2}|405)b\b", re.IGNORECASE), 4),
          (re.compile(r"\b(?:deepseek|kimi)", re.IGNORECASE), 4),
-         (re.compile(r"\b(?:22|24|27|30|32|34|35)b\b", re.IGNORECASE), 2))
+         (re.compile(r"\b(?:2[0-9]|3[0-9]|4[0-9]|5[0-9])b\b", re.IGNORECASE), 2))
 
 # Not every model on the catalogue has its end-of-turn token wired up as a stop,
 # and one that does not runs straight past it and writes the next speaker's line

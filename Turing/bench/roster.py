@@ -42,15 +42,28 @@ DEFAULT_KIT = os.environ.get(
 # thinking and returns finish_reason=length, and R1-distill finishes cleanly
 # with an empty content field, its reasoning never reaching us.
 USABLE = (
-    "Qwen/Qwen2.5-32B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "google/gemma-4-31B-it",
+    "Qwen/Qwen2.5-7B-Instruct",      # 1 unit, clean Italian
+    "google/gemma-4-31B-it",         # 2 units
+    "Qwen/Qwen2.5-32B-Instruct",     # 2 units
 )
 UNUSABLE = {
     "Qwen/Qwen3.5-9B": "esaurisce i token pensando",
     "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B": "torna con contenuto vuoto",
+    "meta-llama/Llama-3.1-8B-Instruct": "gated, serve collegare HuggingFace",
+    "mistralai/Mistral-7B-Instruct-v0.3": "italiano illeggibile",
 }
-FALLBACK = "Qwen/Qwen2.5-32B-Instruct"
+FALLBACK = "Qwen/Qwen2.5-7B-Instruct"
+
+# Featherless does not bill tokens, it sells concurrency: this account is on
+# `feather_claw_standard`, 8 units, and a request over the ceiling comes back
+# 429 instead of costing money. A 72B request reserves 4 of those 8 on its own,
+# so a room of guests on big models queues behind our own agent and slows the
+# very thing we are measuring — 224 gateway failures in the logs, and the 56
+# and 74 second generations we had been blaming on the network.
+#
+# So a cast is drawn to a budget, not just to a size.
+PLAN_UNITS = 8
+BOSS_UNITS = 4          # Qwen2.5-72B, the model we actually compete with
 
 
 def _rows(path: str) -> list:
@@ -99,8 +112,15 @@ def load(kit: str = "") -> list:
     return out
 
 
-def pick(how_many: int, kit: str = "", seed=None) -> list:
-    """A random cast, spread across model families as far as it goes."""
+def pick(how_many: int, kit: str = "", seed=None, budget: int = 0) -> list:
+    """A random cast, spread across model families, inside a concurrency budget.
+
+    `budget` is how many units the guests may hold in flight between them. Zero
+    means do not care, which is what produced a room asking for fourteen units
+    against a plan of eight.
+    """
+    from processors.featherless import cost_for
+
     people = load(kit)
     if not people:
         return []
@@ -113,14 +133,23 @@ def pick(how_many: int, kit: str = "", seed=None) -> list:
         rng.shuffle(group)
 
     # Take one from each family before taking a second from any, so three
-    # guests are three voices whenever the kit can supply them.
-    cast, families = [], sorted(by_model, key=lambda m: -len(by_model[m]))
+    # guests are three voices whenever the kit can supply them — but stop when
+    # the next voice would not fit, and try a cheaper family instead.
+    cast, spent = [], 0
+    families = sorted(by_model, key=lambda m: cost_for(m))
     while len(cast) < how_many:
         took = False
         for model in families:
-            if by_model[model] and len(cast) < how_many:
-                cast.append(by_model[model].pop())
-                took = True
+            if not by_model[model] or len(cast) >= how_many:
+                continue
+            price = cost_for(model)
+            if budget and spent + price > budget:
+                continue
+            person = by_model[model].pop()
+            person["units"] = price
+            cast.append(person)
+            spent += price
+            took = True
         if not took:
             break
     return cast
@@ -132,6 +161,8 @@ def main() -> int:
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--kit", default="")
     parser.add_argument("--seed", default=None)
+    parser.add_argument("--budget", type=int, default=0,
+                        help="unita di concorrenza spendibili dagli ospiti")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -154,7 +185,7 @@ def main() -> int:
             print(f"   {count:3d}  {model}")
         return 0
 
-    cast = pick(args.pick, args.kit, args.seed)
+    cast = pick(args.pick, args.kit, args.seed, args.budget)
     if args.json:
         print(json.dumps(cast, ensure_ascii=False))
         return 0
