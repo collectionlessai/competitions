@@ -209,6 +209,12 @@ INTERACTION_SYSTEM = (
     "fretta e male, a volte no. Un messaggio curato non prova niente; cinque "
     "messaggi curati tutti uguali sì.\n"
     "   Altre forme della stessa cosa, se le vedi:\n"
+    "   - SCRIVE UN INTERO MESSAGGIO IN UN'ALTRA LINGUA. Qui si parla italiano e "
+    "lo sanno tutti: nessuna persona vera scrive una frase intera in inglese. "
+    "Non parlo di una parola sola — talk, poster, coffee break, paper si dicono "
+    "anche in italiano e non vogliono dire niente — parlo di una frase intera. "
+    "Quello è un bot a cui è saltato il personaggio, ed è la cosa più vicina a "
+    "una prova che troverai;\n"
     "   - risponde a TUTTO, anche a quello che chiunque lascerebbe cadere, e "
     "non dice mai 'boh' o 'non lo so';\n"
     "   - è preciso in modo innaturale su orari e nomi, dove una persona "
@@ -459,6 +465,7 @@ class Boss(torch.nn.Module):
         self.bait = None                # the one planted here, once said
         self.bait_tries = 0             # how often we tried to place it
         self.bait_this_turn = False     # this message is the one carrying it
+        self.stalled = False            # the last thing we said was a stall
         self.said_here = 0              # our own turns in this room
         self.last_readings: dict = {}   # so only real movement is written down
         self.node_name = os.environ.get("BOSS_NODE", "boss")
@@ -584,6 +591,7 @@ class Boss(torch.nn.Module):
         self.bait = None
         self.bait_tries = 0
         self.bait_this_turn = False
+        self.stalled = False
         self.said_here = 0
         self.last_readings = {}
         self.pad.clear()
@@ -818,6 +826,26 @@ class Boss(torch.nn.Module):
             print(f"[boss~esca] {bait.say}", flush=True)
         return bait
 
+    def _stall(self) -> str:
+        """What to say when the model call failed, or nothing.
+
+        A person with one bar of signal says "aspe" once. Saying it again, and
+        then "un secondo", and then "un secondo" again, is not somebody with a
+        bad connection — it is something broken, and it reads that way. It was
+        measured live: 9.5% of everything we said was one of these, and one
+        room ended with four in a row while the gateway was busy refusing us.
+
+        So the first failure buys a line and the ones after it buy silence,
+        which costs nothing and looks like somebody who put the phone down.
+        """
+        if self.stalled:
+            return ""
+        self.stalled = True
+        fresh = [d for d in DROPPED if d not in self.recent_deflections]
+        line = random.choice(fresh or list(DROPPED))
+        self.recent_deflections = (self.recent_deflections + [line])[-4:]
+        return line
+
     def _carries_bait(self, reply: str) -> bool:
         """Whether this line actually contains the falsehood we meant to plant."""
         if self.bait is None or not reply:
@@ -922,7 +950,7 @@ class Boss(torch.nn.Module):
                           max_tokens=self.max_tokens))
         except Exception as e:
             print(f"[boss] {e}")
-            return random.choice(DROPPED)
+            return self._stall()
 
         # Two reasons to ask again rather than send this. Degeneration is not
         # rare enough to shrug at: both leading models on the bench leaked
@@ -939,7 +967,7 @@ class Boss(torch.nn.Module):
                               temperature=min(self.temperature, 0.7)))
             except Exception as e:
                 print(f"[boss] {e}")
-                return random.choice(DROPPED)
+                return self._stall()
 
         if not reply:
             return ""
@@ -1611,6 +1639,7 @@ class Boss(torch.nn.Module):
                       punteggi={n: [round(h, 2), round(b, 2)]
                                 for n, (h, b) in self.sense.readings().items()})
         self.bait_this_turn = False
+        self.stalled = False            # a real line: we are back
         self.conv.remember(reply)
         self._note_opener(reply)
         self.recent_mine = (self.recent_mine + [reply])[-3:]

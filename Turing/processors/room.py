@@ -31,6 +31,8 @@ import re
 import time
 import statistics
 
+from processors import humanise
+
 # **Roy**. The sender prefix has already been eaten by Conversation, so every
 # pair of asterisks left in a manager message is marking somebody's name
 BOLD = re.compile(r"\*\*(.+?)\*\*")
@@ -139,6 +141,7 @@ class Speaker:
             "capital": self._rate(lambda m: m[:1].isupper()),
             "full_stop": self._rate(lambda m: m.rstrip().endswith((".", "!", "?"))),
             "emoji": self._rate(lambda m: bool(EMOJI.search(m))),
+            "straniero": self._rate(humanise.foreign_language),
             "question": self._rate(lambda m: "?" in m),
         }
 
@@ -215,6 +218,16 @@ class Speaker:
         # measured across the bench is 0.38, with 12% above 0.70.
         if coverage is not None and windows >= 5:
             bot_terms.append(0.55 * min(1.0, max(0.0, (coverage - 0.55) / 0.35)))
+
+        # A whole sentence in another language. The competition is in Italian
+        # and everyone is told so, so this is not a shade of evidence: it is a
+        # bot whose prompt slipped. Heaviest term on the axis, and deliberately
+        # able to clear the "stop listening" bar on its own — the point is as
+        # much to stop answering as to judge. Our own model is Qwen, whose
+        # Italian is a second language, and four of its six measured English
+        # slips came straight after an English word appeared in the room.
+        if f["count"] >= 2:
+            bot_terms.append(0.8 * min(1.0, f["straniero"] / 0.34))
 
         # Emoji. `features()` has computed this since the beginning and nothing
         # ever read it. 19.5% of the guests' messages carry one against 0.0% of

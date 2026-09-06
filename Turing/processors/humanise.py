@@ -794,6 +794,77 @@ TRADUZIONI = (
 )
 
 
+# Italian function words that are not also English words. The exclusions
+# matter more than the inclusions: "a", "i", "in", "me", "no", "e", "o", "la"
+# and "come" are all Italian AND English, so a message full of them says
+# nothing about which language it is in. What is left is dense enough that no
+# real Italian sentence of five words avoids all of it.
+PAROLE_ITALIANE = frozenset((
+    "di", "da", "per", "con", "su", "tra", "fra", "il", "lo", "gli", "le",
+    "del", "dello", "della", "dei", "degli", "delle", "al", "allo", "alla",
+    "ai", "agli", "alle", "nel", "nella", "nei", "nelle", "dal", "dalla",
+    "ma", "che", "chi", "cui", "se", "quando", "mentre", "perché", "perche",
+    "però", "pero", "non", "più", "piu", "anche", "già", "gia", "ancora",
+    "sempre", "mai", "molto", "poco", "tutto", "tutti", "tutta", "troppo",
+    "sono", "sei", "siamo", "siete", "ho", "hai", "abbiamo", "avete", "hanno",
+    "era", "erano", "essere", "fare", "fatto", "detto", "dire", "vedere",
+    "mi", "ti", "ci", "vi", "si", "te", "noi", "voi", "loro", "io", "tu",
+    "lui", "lei", "questo", "questa", "quello", "quella", "queste", "questi",
+    "cosa", "niente", "nulla", "qui", "qua", "boh", "mah", "cioè", "cioe",
+    "magari", "proprio", "davvero", "forse", "quindi", "allora", "adesso",
+    "oggi", "ieri", "domani", "sopra", "sotto", "dentro", "fuori", "vabbè",
+    "grazie", "prego", "scusa", "scusate", "ragazzi", "gente", "bene", "male",
+))
+
+
+# The other half of the test. Absence of Italian is not enough on its own:
+# "tua comoda stanza d'albergo a scriverti a monosillabi?" and "ah ok ok... e
+# poi?" are both Italian and both contain none of the words above, and the
+# first version flagged 2.8% of our own messages because of it. So a message
+# has to be missing Italian AND carrying somebody else's grammar.
+PAROLE_STRANIERE = frozenset((
+    # English function words, which is what actually turns up here
+    "the", "and", "is", "are", "was", "were", "be", "been", "being",
+    "this", "that", "these", "those", "with", "for", "from", "about",
+    "you", "your", "my", "his", "her", "our", "their", "they", "them",
+    "have", "has", "had", "what", "how", "when", "where", "which", "who",
+    "here", "there", "just", "would", "could", "should", "will", "can",
+    "get", "got", "like", "know", "think", "going", "want", "need",
+    "hey", "yeah", "guys", "folks", "much", "some", "any", "very",
+    "not", "but", "than", "then", "because", "while", "still", "always",
+    # a few Spanish and French markers, cheap to carry
+    "muy", "pero", "porque", "estoy", "también", "hola", "gracias",
+    "je", "tu", "vous", "nous", "est", "sont", "avec", "pour", "mais",
+))
+
+
+def foreign_language(text: str, floor: int = 5) -> bool:
+    """Whether this message is a whole sentence in a language that is not Italian.
+
+    The competition is held in Italian and every guest is told so, which puts
+    this closer to proof than to evidence: a human entrant does not write a
+    full sentence in English. What produces one is a bot whose prompt slipped.
+
+    It matters defensively too. Our own model is Qwen, whose Italian is a
+    second language, and four of its six measured English slips came directly
+    after an English word appeared in the room. A foreign message on the table
+    pulls us into code-switching, so spotting it is as much about not replying
+    to it as about judging whoever sent it.
+
+    Blunt at both ends on purpose. Under `floor` words it says nothing — "ok",
+    "no problem", "coffee break" are what everybody types, and single loanwords
+    are ordinary Italian at a computational linguistics conference. Above it,
+    one Italian function word acquits, and foreign grammar has to be positively
+    present before anything is claimed.
+    """
+    words = re.findall(r"[a-zà-ÿ']+", text.lower())
+    if len(words) < floor:
+        return False
+    if any(word in PAROLE_ITALIANE for word in words):
+        return False
+    return sum(1 for word in words if word in PAROLE_STRANIERE) >= 2
+
+
 def repair_english(text: str) -> str:
     """Put back the Italian word the model swapped for an English one.
 
