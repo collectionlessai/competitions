@@ -40,7 +40,7 @@ from policies.boss_timing import BossTiming
 # Your node's name on the network. The room gives you another one, which is the
 # one the other guests see. Every distinct name takes a permanent slot on the
 # account, so this one gets reused between runs rather than invented again.
-NODE_NAME = "TuringBoss"
+NODE_NAME = os.environ.get("BOSS_NODE", "TuringMiniBoss")
 
 # The competition hotel. The prefix is the organisers' account nickname and it
 # is NOT optional: world names resolve per account, so a bare name only ever
