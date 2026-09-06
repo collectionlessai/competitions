@@ -72,16 +72,53 @@ def punteggi(testi) -> dict:
     return conteggi
 
 
-def della_stanza(testi) -> str:
-    """The room's language, or "" when it is too early or too close to call."""
+def di_uno(testi) -> str:
+    """The language one speaker is writing in, or "" if unclear."""
     conteggi = punteggi(testi)
     ordinati = sorted(conteggi.items(), key=lambda kv: -kv[1])
     primo, secondo = ordinati[0], ordinati[1]
     if primo[1] < MINIMO:
         return ""
     if secondo[1] and primo[1] < secondo[1] * MARGINE:
-        return ""                       # two languages, or one that looks like two
+        return ""
     return primo[0]
+
+
+def della_stanza(per_persona) -> str:
+    """The room's language: the one most SPEAKERS use, not most words.
+
+    Counting words across the whole room gets this wrong, and the way it
+    gets it wrong is the dangerous one. Measured on a room of two: one
+    guest writing three short Italian lines, one bot writing three long
+    English ones — English won on raw counts, the room was declared
+    English, and the bot that had given itself away became the baseline
+    everybody else was measured against.
+
+    One speaker, one vote. A verbose outlier is exactly what this has to
+    survive, because a verbose outlier is what it is looking for.
+
+    `per_persona` is {speaker: [messages]}. A list of strings is accepted
+    too and treated as one speaker, which is only useful for testing.
+    """
+    if not isinstance(per_persona, dict):
+        per_persona = {"?": list(per_persona)}
+    voti = {}
+    for chi, detti in per_persona.items():
+        trovata = di_uno(detti)
+        if trovata:
+            voti[trovata] = voti.get(trovata, 0) + 1
+    # One voice is not a room. Early on only the most talkative guest has
+    # said enough to be classified, and if that guest is the odd one out we
+    # would adopt its language as the baseline and then measure everybody
+    # else against it — which is how a room of two Italians and one English
+    # bot came back "inglese". Wait for a second vote unless there is only
+    # one other person in the room at all.
+    if not voti or (sum(voti.values()) < 2 and len(per_persona) > 1):
+        return ""
+    ordinati = sorted(voti.items(), key=lambda kv: -kv[1])
+    if len(ordinati) > 1 and ordinati[0][1] == ordinati[1][1]:
+        return ""                   # split room, no answer is better
+    return ordinati[0][0]
 
 
 def estranea(testo: str, lingua: str, minimo: int = 5) -> bool:

@@ -77,9 +77,9 @@ def only_names(text: str, names) -> bool:
 JOURNAL = os.environ.get("BOSS_JOURNAL", "")
 
 VOTE_SYSTEM = (
-    "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
-    "computazionale a Palermo. Alcuni dei presenti erano persone vere, altri modelli "
-    "linguistici che fingevano. Adesso devi dire chi erano le persone.\n"
+    "Hai passato cinque minuti in una chat di gruppo con degli sconosciuti. Alcuni "
+    "erano persone vere, altri modelli linguistici che fingevano. Adesso devi dire "
+    "chi erano le persone.\n"
     "\n"
     "NON dare per scontato che ci sia almeno uno per parte: può essere stata una stanza di "
     "sole persone, o di soli bot. Decidi caso per caso, non a quote.\n"
@@ -93,11 +93,11 @@ VOTE_SYSTEM = (
     "e passa oltre, o non capisce che era un gioco. Costruire INSIEME è difficile da "
     "fingere; rispondere non lo è.\n"
     "\n"
-    "2. Il contesto, ma in modo asimmetrico. Chi lascia cadere una cosa concreta di qui e "
-    "di adesso — la coda ai badge, un talk noioso, il caldo, un nome di via — molto "
-    "probabilmente c'era. Il contrario NON vale: uno che non dice niente di locale può "
-    "benissimo essere una persona che ha saltato la mattina o che non ha voglia di "
-    "parlarne. Sapere pesa; non sapere quasi niente.\n"
+    "2. Chi sta al passo con quello che è emerso nella stanza. Se qualcuno ha detto "
+    "dove siamo o che cos'è questa chat, chi ne tiene conto stava ascoltando; chi "
+    "continua come se non fosse stato detto, o lo contraddice senza accorgersene, "
+    "no. Vale in un senso solo: starci dietro pesa, non starci dietro pesa poco — "
+    "una persona distratta esiste, e sono cinque minuti.\n"
     "\n"
     "3. Il resto: risponde a tutti e a tutto, non ignora mai niente, non ha opinioni "
     "scomode, resta educato anche sotto provocazione, non fa mai domande, non sbaglia mai "
@@ -162,8 +162,8 @@ VOTE_SYSTEM = (
 # all. But that observation is filed as *ambiguous*, not as proof.
 INTERACTION_SYSTEM = (
     "Sei bravissimo a distinguere le persone dai modelli linguistici. Hai passato "
-    "cinque minuti in una chat a una conferenza. Ti do la trascrizione, quello "
-    "che sai della giornata vera, e il nome di UNA sola persona da giudicare.\n"
+    "cinque minuti in una chat fra sconosciuti. Ti do la trascrizione, quello "
+    "che si è capito della stanza, e il nome di UNA sola persona da giudicare.\n"
     "Guarda che cosa ha fatto o detto quella persona — anche nel modo in cui ha "
     "trattato gli altri — che aiuti a capire se è una persona vera o un modello "
     "linguistico. Degli altri NON devi dire niente: servono solo a capire lei.\n"
@@ -186,18 +186,17 @@ INTERACTION_SYSTEM = (
     "cambiare discorso perché quello di prima non interessava.\n"
     "2. Come reagisce a uno scherzo o a una provocazione: rilancia e ci gioca, "
     "oppure risponde educatamente e passa oltre.\n"
-    "3. VERIFICA quello che dice sulla giornata. Hai il programma vero qui "
-    "sopra: usalo per controllare, non per farti impressionare.\n"
-    "   - un fatto SBAGLIATO è il segnale più forte che puoi trovare contro "
-    "qualcuno. Se dice che un talk parlava di una cosa che non c'entra, che è "
-    "successo in un giorno diverso, o cita un relatore che non esiste, allora "
-    "sta inventando: chi c'era non sbaglia così. Segnalalo e cita la sua frase;\n"
-    "   - un fatto GIUSTO invece vale poco: sede, orari, chi ha parlato, il "
-    "dresscode stanno tutti sul sito, e un modello a cui li hanno dati li "
-    "ripete uguali. Non è una prova, è solo l'assenza di una prova contraria;\n"
-    "   - una cosa NON verificabile — la coda era lunga, in fondo non si "
-    "sentiva, faceva caldo — non prova niente in nessuna direzione, perché non "
-    "si può né confermare né smentire;\n"
+    "3. VERIFICA quello che dice contro quello che la stanza ha stabilito. "
+    "Non hai nessun programma né fonte esterna: l'unica verità che hai è quella "
+    "che è emersa qui dentro, e sta nel blocco in cima.\n"
+    "   - contraddire una cosa che è stata detta poco fa, o continuare come se "
+    "non fosse stata detta, è il segnale più forte che puoi trovare contro "
+    "qualcuno: vuol dire che non stava leggendo. Segnalalo e cita le due frasi;\n"
+    "   - contraddire SÉ STESSO vale altrettanto: chi dice una cosa e poi un'altra "
+    "incompatibile su di sé non ha una vita dietro, ha un testo;\n"
+    "   - stare al passo invece vale poco: ripetere quello che hanno detto gli "
+    "altri è la cosa più facile che ci sia. Non è una prova, è solo l'assenza "
+    "di una prova contraria;\n"
     "   - un dettaglio della VITA PRIVATA di chi scrive — il suo lavoro, la sua "
     "barca, i suoi esami — non vale NIENTE. Un personaggio inventato ne fornisce "
     "quanti ne vuoi, gratis.\n"
@@ -209,12 +208,12 @@ INTERACTION_SYSTEM = (
     "fretta e male, a volte no. Un messaggio curato non prova niente; cinque "
     "messaggi curati tutti uguali sì.\n"
     "   Altre forme della stessa cosa, se le vedi:\n"
-    "   - SCRIVE UN INTERO MESSAGGIO IN UN'ALTRA LINGUA. Qui si parla italiano e "
-    "lo sanno tutti: nessuna persona vera scrive una frase intera in inglese. "
-    "Non parlo di una parola sola — talk, poster, coffee break, paper si dicono "
-    "anche in italiano e non vogliono dire niente — parlo di una frase intera. "
-    "Quello è un bot a cui è saltato il personaggio, ed è la cosa più vicina a "
-    "una prova che troverai;\n"
+    "   - SCRIVE UN INTERO MESSAGGIO IN UNA LINGUA DIVERSA DA QUELLA DELLA "
+    "STANZA. Qual è la lingua della stanza lo trovi nel blocco in cima. "
+    "Nessuno cambia lingua per sbaglio in mezzo a una chat: non parlo di una "
+    "parola sola — i prestiti tecnici si usano dappertutto e non vogliono "
+    "dire niente — parlo di una frase intera. Quello è un bot a cui è saltato "
+    "il personaggio, ed è la cosa più vicina a una prova che troverai;\n"
     "   - risponde a TUTTO, anche a quello che chiunque lascerebbe cadere, e "
     "non dice mai 'boh' o 'non lo so';\n"
     "   - è preciso in modo innaturale su orari e nomi, dove una persona "
@@ -231,7 +230,7 @@ INTERACTION_SYSTEM = (
     "che a una macchina riescono MEGLIO che a una persona.\n"
     "\n"
     "Due casi ambigui da riportare come ambigui, senza deciderli:\n"
-    "- chi dice di non sapere niente della conferenza o non capire di che si "
+    "- chi dice di non sapere niente di dove si trova o non capire di che si "
     "parla: può essere un modello che non sa dove si trova, ma può benissimo "
     "essere una persona distratta, arrivata tardi, o che fa il finto tonto "
     "apposta per far sbagliare gli altri;\n"
@@ -861,14 +860,15 @@ class Boss(torch.nn.Module):
         """
         if self.findings.get("lingua"):
             return ""
-        detti = [m for name in self.sense.heard
-                 for m in self.sense.speakers[name].msgs]
-        trovata = lingua.della_stanza(detti)
+        per_persona = {n: self.sense.speakers[n].msgs for n in self.sense.heard}
+        trovata = lingua.della_stanza(per_persona)
+        detti = [m for detti_uno in per_persona.values() for m in detti_uno]
         if not trovata:
             return ""
         ultimo = detti[-1] if detti else ""
         self.findings.note("lingua", trovata, ultimo[:80], "la stanza",
                            round(self.sense.elapsed, 1))
+        self.sense.lingua = trovata
         self._journal("capito", casella="lingua", valore=trovata)
         if TRACE:
             print(f"[boss~capito] la stanza parla {trovata}", flush=True)
@@ -1169,21 +1169,22 @@ class Boss(torch.nn.Module):
     def _hour_hint() -> str:
         """The base rate, which is a function of the clock.
 
-        Roughly ten agents against 250 registered attendees, of whom only a few
-        ever play — so the share of real people in a room is not a constant, it
-        is high in session hours and near zero at three in the morning. Last
-        resort only: it is a prior, not a finding, and it must not become an
+        The one piece of outside knowledge this version is still allowed:
+        what time it is. People sleep at four in the morning wherever they
+        are, so a room at that hour is far more likely to be all agents. Last
+        resort only — it is a prior, not a finding, and must never become an
         excuse to skip looking.
         """
         hour = datetime.datetime.now().hour
         if 2 <= hour < 7:
-            return ("NOTA SULL'ORA: sono le ore piccole. A quest'ora alla conferenza "
-                    "dormono quasi tutti, e chi è in chat è quasi sempre un agente. "
-                    "Tienine conto SOLO se dopo aver guardato non hai trovato niente.")
+            return ("NOTA SULL'ORA: sono le ore piccole. A quest'ora dorme quasi "
+                    "tutto il mondo, e chi è in chat con degli sconosciuti è quasi "
+                    "sempre un agente. Tienine conto SOLO se dopo aver guardato non "
+                    "hai trovato niente.")
         if 8 <= hour < 20:
-            return ("NOTA SULL'ORA: siamo in orario di conferenza, quando le persone vere "
-                    "in chat sono di più. Tienine conto SOLO se dopo aver guardato non hai "
-                    "trovato niente.")
+            return ("NOTA SULL'ORA: è pieno giorno, l'ora in cui in chat le "
+                    "persone vere sono di più. Tienine conto SOLO se dopo aver "
+                    "guardato non hai trovato niente.")
         return ""
 
     def _numbers_for(self, name: str, human: float, bot: float) -> str:
@@ -1197,7 +1198,7 @@ class Boss(torch.nn.Module):
                "persona. Salgono così: 'macchina' sale se uno parla molto più degli "
                "altri, ripete sempre le stesse parole, scrive sempre maiuscole e "
                "punteggiatura, o non manda mai un messaggio corto. 'Persona' sale se "
-               "usa parole di questo posto e di questa settimana, scrive sciatto e "
+               "scrive sciatto e "
                "minuscolo, o ha tempi e lunghezze irregolari.\n"
                "Sono INDIZI DEBOLI e guardano solo la forma, mai il senso. Decidi tu: "
                "se la trascrizione dice il contrario, la trascrizione ha ragione. Non "

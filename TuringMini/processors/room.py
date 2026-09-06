@@ -32,6 +32,7 @@ import time
 import statistics
 
 from processors import humanise
+from processors import lingua
 
 # **Roy**. The sender prefix has already been eaten by Conversation, so every
 # pair of asterisks left in a manager message is marking somebody's name
@@ -141,12 +142,11 @@ class Speaker:
             "capital": self._rate(lambda m: m[:1].isupper()),
             "full_stop": self._rate(lambda m: m.rstrip().endswith((".", "!", "?"))),
             "emoji": self._rate(lambda m: bool(EMOJI.search(m))),
-            "straniero": self._rate(humanise.foreign_language),
             "question": self._rate(lambda m: "?" in m),
         }
 
     def read(self, share: float | None = None, markers=(),
-             windows: int = 0) -> tuple[float, float]:
+             windows: int = 0, lingua_stanza: str = "") -> tuple[float, float]:
         """`(human, bot)`, each 0 = no evidence at all, 1 = confident.
 
         Two axes rather than one, because a single number could not say the
@@ -219,15 +219,17 @@ class Speaker:
         if coverage is not None and windows >= 5:
             bot_terms.append(0.55 * min(1.0, max(0.0, (coverage - 0.55) / 0.35)))
 
-        # A whole sentence in another language. The competition is in Italian
-        # and everyone is told so, so this is not a shade of evidence: it is a
-        # bot whose prompt slipped. Heaviest term on the axis, and deliberately
-        # able to clear the "stop listening" bar on its own — the point is as
-        # much to stop answering as to judge. Our own model is Qwen, whose
-        # Italian is a second language, and four of its six measured English
-        # slips came straight after an English word appeared in the room.
-        if f["count"] >= 2:
-            bot_terms.append(0.8 * min(1.0, f["straniero"] / 0.34))
+
+        # A whole message in a language that is not the room's. TuringBoss
+        # compared against Italian because somebody had told it the
+        # competition was in Italian; here the room's own language is worked
+        # out from what arrives (`lingua.py`) and this compares against that.
+        # Heaviest term on the axis: nobody switches language by accident in
+        # the middle of a chat, so it is a bot whose character slipped.
+        if lingua_stanza and f["count"] >= 2:
+            quota = sum(1 for m in self.msgs
+                        if lingua.estranea(m, lingua_stanza)) / len(self.msgs)
+            bot_terms.append(0.8 * min(1.0, quota / 0.34))
 
         # Emoji. `features()` has computed this since the beginning and nothing
         # ever read it. 19.5% of the guests' messages carry one against 0.0% of
@@ -393,6 +395,7 @@ class RoomSense:
     def __init__(self, manager_guess: str = "MANAGER", markers=(), strong=()):
         self.manager_guess = manager_guess
         self.markers = frozenset(markers)
+        self.lingua = ""            # what the room speaks, once we know
         self.strong = frozenset(strong)
         self.state = ""             # last state name the policy filter saw
         self.states_seen: dict = {}  # every distinct one, and how often
@@ -657,25 +660,17 @@ class RoomSense:
 
     # -- evidence for the vote -------------------------------------------
 
-    def local_hits(self, name: str) -> list:
-        """The insider words this guest actually used."""
-        said = " ".join(self.speakers[name].msgs).lower()
-        return sorted({w for w in self.markers | self.strong if _said(said, w)})
-
     def evidence(self) -> str:
-        """Per-speaker numbers for the analyst, with the local words spelled out.
+        """Per-speaker numbers for the analyst.
 
-        The last field is the one that decides most rooms: a guest who spent
-        five minutes at a conference in Palermo and never once said anything
-        that could only be said here was not, in fact, here.
+        TuringBoss ended this line with the insider words each guest had
+        used, and that field decided most rooms: five minutes at a
+        conference without once saying anything only somebody there could
+        say meant they were not there. There is no insider vocabulary to
+        check against here, so the numbers stand on their own and the
+        analyst does the rest from the transcript.
         """
-        rows = []
-        for name in self.heard:
-            hits = self.local_hits(name)
-            local = (", ".join(hits[:4]) if hits
-                     else "NIENTE che c'entri con Palermo o con la conferenza")
-            rows.append(f"{self.speakers[name].summary()} | roba locale: {local}")
-        return "\n".join(rows)
+        return "\n".join(self.speakers[name].summary() for name in self.heard)
 
     def shares(self) -> dict[str, float]:
         """Each guest's fraction of everything said in the room, our own lines included.
@@ -699,7 +694,8 @@ class RoomSense:
     def readings(self) -> dict[str, tuple[float, float]]:
         """`{name: (human, bot)}` — the two axes, for the vote to read."""
         shares = self.shares()
-        return {n: self.speakers[n].read(shares.get(n), self.markers, self.turns)
+        return {n: self.speakers[n].read(shares.get(n), self.markers, self.turns,
+                                        self.lingua)
                 for n in self.heard}
 
     # Blatant enough that everybody in the room can see it. The point is not
@@ -733,7 +729,8 @@ class RoomSense:
             return ""                    # too early to be sure of anything
         if speaker.mechanical():
             return "bot"                 # a template or a metronome, no doubt
-        human, bot = speaker.read(self.shares().get(name), self.markers, self.turns)
+        human, bot = speaker.read(self.shares().get(name), self.markers,
+                                  self.turns, self.lingua)
         if bot >= self.BLATANT_BOT and human < self.BLATANT_NOT_HUMAN:
             return "bot"
         return ""
