@@ -440,6 +440,15 @@ class Boss(torch.nn.Module):
         self.preamble, self.personas = load_personas(persona_file)
         self.conv = Conversation(keep=keep)
         self.context = Context()          # the conference, sliced by the clock
+        # Today's sky, over the written one. The line in the file goes stale in
+        # a day — it said 27 and drizzle on a morning that turned out 31 and
+        # clear — and the weather is the one fact every guest can check out of
+        # the window. Fetched here rather than in the launcher so that whoever
+        # starts this does not have to know the agent has a knowledge base at
+        # all. Six seconds at most, and any failure keeps the written line.
+        live = self.context.refresh_weather()
+        if live and TRACE:
+            print(f"[boss] meteo dal vivo: {live}", flush=True)
         # No `strong` tier any more: it came from `## NOTE`, and hand-editing
         # the context while the competition runs is not allowed.
         self.sense = RoomSense(markers=self.context.markers())
