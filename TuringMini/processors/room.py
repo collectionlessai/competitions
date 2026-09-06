@@ -428,6 +428,10 @@ class RoomSense:
 
     def reset(self) -> None:
         self.manager: str | None = None
+        # What the manager has said, kept for one reason: the world writes its
+        # own messages in the room's official language, and that is a better
+        # answer than counting the guests. See `Boss._learn_language`.
+        self.manager_said: list[str] = []
         self.my_name: str = ""
         self.announced: list[str] = []          # names the briefing and the joins gave us
         self.speakers: dict[str, Speaker] = {}  # who actually said something
@@ -541,6 +545,10 @@ class RoomSense:
         """Take our name and the roster out of the briefing, and learn the manager's name."""
         self.reset()
         self.manager = speaker or self.manager_guess
+        # `reset()` has just cleared this, and the briefing is the one manager
+        # message we most want to keep: it is the longest, and it is written in
+        # the room's official language.
+        self.manager_said.append(strip_html(text))
 
         names = [n.strip() for n in BOLD.findall(strip_html(text))]
         if names:
@@ -566,6 +574,8 @@ class RoomSense:
                 continue
 
             manager_text = text
+            if len(self.manager_said) < 8:
+                self.manager_said.append(text)
             briefing = self._briefing_score(text)
             vote = self._vote_score(text)
             top_vote = max(top_vote, vote)

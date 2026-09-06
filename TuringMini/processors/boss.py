@@ -860,9 +860,21 @@ class Boss(torch.nn.Module):
         """
         if self.findings.get("lingua"):
             return ""
-        per_persona = {n: self.sense.speakers[n].msgs for n in self.sense.heard}
-        trovata = lingua.della_stanza(per_persona)
-        detti = [m for detti_uno in per_persona.values() for m in detti_uno]
+        # The manager first. The world writes its own messages — the briefing,
+        # the reminders, the vote request — in the room's official language,
+        # and that beats counting guests. Measured live: three lab guests on a
+        # small model drifted into English between them, the majority vote
+        # called the room English, and the one guest still writing Italian
+        # scored 0.86 on the machine axis for being the odd one out. In a room
+        # with a real person in it that is the person we would have flagged.
+        trovata = lingua.della_stanza({"manager": self.sense.manager_said})
+        if not trovata:
+            per_persona = {n: self.sense.speakers[n].msgs for n in self.sense.heard}
+            trovata = lingua.della_stanza(per_persona)
+        else:
+            per_persona = {}
+        detti = ([m for detti_uno in per_persona.values() for m in detti_uno]
+                 or self.sense.manager_said)
         if not trovata:
             return ""
         ultimo = detti[-1] if detti else ""
