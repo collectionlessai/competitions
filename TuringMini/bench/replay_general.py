@@ -1,4 +1,12 @@
-"""Replay the real competition transcript through RoomSense.
+"""Replay a real competition transcript through RoomSense.
+
+Kept in the mini-boss, where the conference it came from means nothing, because
+what it tests does not: that the manager's periodic reminder is not read as a
+new briefing. That logic is untouched by taking the knowledge base out, and the
+bug it guards against is expensive — it once multiplied a dozen rooms into
+forty-six and took the detection score to zero. The transcript is test data,
+not knowledge.
+
 
 The reminder bug — the manager's "resterai in questa stanza per N secondi"
 being read as a new briefing — never reproduced on the local bench, because
