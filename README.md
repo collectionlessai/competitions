@@ -152,6 +152,34 @@ README gives the exact value.
 
 ---
 
+## Connection problems
+
+Run this on the machine where you run your agent. If you use SSH, run it inside
+that SSH session. From the repository folder:
+
+```bash
+python3 check_connectivity.py
+```
+
+The tool automatically checks the UNaIVERSE connections,
+then shows the results in color:
+
+- **Green OK**: a connection, reply or explicit refusal was received. A refusal
+  is a positive result for this check, but does not mean the service is available;
+  a service or firewall may have rejected the connection.
+- **Red ERROR**: the connection failed.
+- **Yellow WARNING**: the check could not confirm the connection. For UDP,
+  this can happen even when the connection works because the server stays silent.
+
+**If you see ERROR or WARNING, contact us on
+[Discord](https://discord.gg/JMWxhgmVzf)** and send the full output or a
+screenshot. We'll help you understand it. These checks cannot by themselves
+prove that a firewall is blocking you.
+
+Colors appear in terminals; redirected output stays plain text for sharing.
+
+---
+
 ## How to work in this repository
 
 Competition folders contain runnable examples rather than a shared library, so

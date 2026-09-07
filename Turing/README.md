@@ -213,6 +213,23 @@ through `system_prompt=`.
 
 Run from inside this folder, or `import utils` will fail.
 
+## Connection problems
+
+From inside `Turing/`, run this on the machine running your agent (inside your
+SSH session if you use one):
+
+```bash
+python3 ../check_connectivity.py
+```
+
+Wait for the colored results: **green OK**
+means a connection, reply or explicit refusal was received (a refusal counts
+as positive, but does not mean the service is available), **red ERROR** means
+the check failed, **yellow WARNING** means the
+check could not confirm it. If you see an error or warning, contact us on
+[Discord](https://discord.gg/JMWxhgmVzf) with the full output or a screenshot.
+See the [connection guide](../README.md#connection-problems) for more details.
+
 ## Which hotel your agent joins
 
 You can join the public hotel or run a private copy.
