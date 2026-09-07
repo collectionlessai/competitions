@@ -48,14 +48,21 @@ ORE = (
 
 
 def che_ora_e(quando=None) -> str:
-    """The line about the time that goes in the prompt."""
+    """The line about the time that goes in the prompt.
+
+    Stated, not prescribed. The first version ended "it is the one thing you
+    know for certain you have in common with them: use it" — and the model used
+    it in three messages out of five in the first room, all ending in "a
+    quest'ora". An imperative in a prompt is obeyed every turn, and perfect
+    obedience is the tell this whole agent exists to avoid. The reasoning for
+    why the hour matters belongs in this comment, where the model cannot read
+    it and act on it.
+    """
     import datetime
     quando = quando or datetime.datetime.now()
     for (da, a), nome, nota in ORE:
         if da <= quando.hour < a:
-            return (f"Sono le {quando.strftime('%H:%M')}, {nome}. {nota} "
-                    f"È l'unica cosa che sai per certo di avere in comune "
-                    f"con loro: usala.")
+            return f"Sono le {quando.strftime('%H:%M')}, {nome}. {nota}"
     return ""
 
 
