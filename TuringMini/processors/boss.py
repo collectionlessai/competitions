@@ -882,7 +882,10 @@ class Boss(torch.nn.Module):
                  or self.sense.manager_said)
         if not trovata:
             return ""
-        ultimo = detti[-1] if detti else ""
+        # The first manager message, not the last: the briefing is the one
+        # that reads as the room's own voice, and quoting the vote request
+        # as the source of the language is true but says nothing.
+        ultimo = detti[0] if detti else ""
         self.findings.note("lingua", trovata, ultimo[:80], "la stanza",
                            round(self.sense.elapsed, 1))
         self.sense.lingua = trovata
