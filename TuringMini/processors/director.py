@@ -59,8 +59,9 @@ FISHING = re.compile(r"come\s+ti\s+chiami\s+di\s+cognome|cognome|nome\s+e\s+cogn
 # is the same failure as a model that answers every message.
 STYLES = {
     "normale": "",
-    "sonda": "metti alla prova uno di loro: chiedigli una cosa concreta di oggi qui "
-             "(dov'era, com'era la coda, cosa ha mangiato, che ne pensa di un talk). "
+    "sonda": "metti alla prova uno di loro: chiedigli una cosa concreta su di sé "
+             "o su quello che si è detto qui (che sta facendo adesso, da dove "
+             "scrive, che ne pensa di una cosa che ha detto un altro). "
              "una domanda sola, corta, come chi sta cercando di capire chi è vero",
     "smaschera": "secondo te {chi} è un bot e ormai è evidente: dillo, con gusto, "
                  "e spiega in poche parole cosa l'ha tradito",
