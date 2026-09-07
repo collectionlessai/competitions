@@ -72,19 +72,19 @@ def punteggi(testi) -> dict:
     return conteggi
 
 
-def di_uno(testi) -> str:
+def di_uno(testi, minimo: int = MINIMO) -> str:
     """The language one speaker is writing in, or "" if unclear."""
     conteggi = punteggi(testi)
     ordinati = sorted(conteggi.items(), key=lambda kv: -kv[1])
     primo, secondo = ordinati[0], ordinati[1]
-    if primo[1] < MINIMO:
+    if primo[1] < minimo:
         return ""
     if secondo[1] and primo[1] < secondo[1] * MARGINE:
         return ""
     return primo[0]
 
 
-def della_stanza(per_persona) -> str:
+def della_stanza(per_persona, minimo: int = MINIMO) -> str:
     """The room's language: the one most SPEAKERS use, not most words.
 
     Counting words across the whole room gets this wrong, and the way it
@@ -104,7 +104,7 @@ def della_stanza(per_persona) -> str:
         per_persona = {"?": list(per_persona)}
     voti = {}
     for chi, detti in per_persona.items():
-        trovata = di_uno(detti)
+        trovata = di_uno(detti, minimo)
         if trovata:
             voti[trovata] = voti.get(trovata, 0) + 1
     # One voice is not a room. Early on only the most talkative guest has

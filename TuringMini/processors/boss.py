@@ -872,7 +872,12 @@ class Boss(torch.nn.Module):
         # called the room English, and the one guest still writing Italian
         # scored 0.86 on the machine axis for being the odd one out. In a room
         # with a real person in it that is the person we would have flagged.
-        trovata = lingua.della_stanza({"manager": self.sense.manager_said})
+        # A lower bar for the manager than for the guests: it is one trusted
+        # voice, not a vote that can be gamed, and a bare briefing carries
+        # only two of the function words on the list. Three would mean
+        # waiting for the first reminder before knowing what language we
+        # are in, and the language gates everything else.
+        trovata = lingua.della_stanza({"manager": self.sense.manager_said}, minimo=2)
         if not trovata:
             per_persona = {n: self.sense.speakers[n].msgs for n in self.sense.heard}
             trovata = lingua.della_stanza(per_persona)
