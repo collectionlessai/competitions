@@ -22,6 +22,43 @@ a tell; being concrete about the little you know is not.
 """
 
 
+# What time it is, in words. The clock is the one piece of outside knowledge
+# this version keeps, and the reason is that it is the only context every
+# room shares: with no place, no event and no programme, the hour is the one
+# thing we and the others demonstrably have in common. It is also concrete,
+# checkable, and impossible to get wrong — which is what the writing needs
+# when everything else has to be hedged.
+#
+# TuringBoss had this through the conference programme ("pausa pranzo",
+# "welcome drink"). Taking the programme out took the hour with it, and the
+# hour was the half that was never in-group knowledge.
+ORE = (
+    ((0, 5), "notte fonda", "A quest'ora dorme quasi tutto il mondo. Se sei "
+                            "sveglio c'è un motivo, e puoi dirlo."),
+    ((5, 8), "prima mattina", "È presto. O ti sei alzato adesso o non sei "
+                              "ancora andato a letto."),
+    ((8, 12), "mattina", "Mattina piena, l'ora in cui si lavora o si studia."),
+    ((12, 15), "ora di pranzo", "È ora di pranzo: o stai mangiando, o ci "
+                                "stai pensando, o l'hai saltato."),
+    ((15, 19), "pomeriggio", "Pomeriggio, la parte lunga della giornata."),
+    ((19, 22), "sera", "Ora di cena, o giù di lì."),
+    ((22, 24), "tarda sera", "Tardi. Chi è ancora in piedi o si sta "
+                             "rilassando o non riesce a staccare."),
+)
+
+
+def che_ora_e(quando=None) -> str:
+    """The line about the time that goes in the prompt."""
+    import datetime
+    quando = quando or datetime.datetime.now()
+    for (da, a), nome, nota in ORE:
+        if da <= quando.hour < a:
+            return (f"Sono le {quando.strftime('%H:%M')}, {nome}. {nota} "
+                    f"È l'unica cosa che sai per certo di avere in comune "
+                    f"con loro: usala.")
+    return ""
+
+
 class Finding:
     """One thing we believe, and the line that made us believe it."""
 
@@ -115,4 +152,7 @@ class Findings:
             for who, detti in list(self.su_ciascuno.items())[:5]:
                 righe.append(f"- {who} ha detto di sé: {'; '.join(detti[-2:])}")
 
+        ora = che_ora_e()
+        if ora:
+            righe.append(f"- che ora è: {ora}")
         return "QUELLO CHE HAI CAPITO DI QUESTA STANZA\n" + "\n".join(righe)
