@@ -1,10 +1,10 @@
-"""Today's Palermo weather, fetched, with the written line as the fallback.
+"""Today's weather in Siena (the SAINET day), fetched, with the written line as the fallback.
 
 The sky is the one fact everybody in the room can check from where they are
-sitting. A guest complaining about thirty degrees while it drizzles at
-twenty-five has planted a bait against itself, and anybody actually in Palermo
-collects it for free — which is why the line was moved off a hand-written
-stereotype in the first place.
+sitting. A guest complaining about the cold while the sun is out has planted a
+bait against itself, and anybody actually in Siena collects it for free — which
+is why the line was moved off a hand-written stereotype in the first place (at
+CLiC-it it was Palermo's "thirty degrees", while it drizzled at twenty-five).
 
 `update_weather.py` does the same job by rewriting `context_it.txt`, and that is
 still the right thing before a run. This is for the case that matters more: a
@@ -19,7 +19,8 @@ import datetime
 import json
 import urllib.request
 
-PALERMO = (38.1157, 13.3615)
+CITY = "Siena"
+WHERE = (43.3188, 11.3308)
 API = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code"
        "&timezone=Europe%2FRome&start_date={day}&end_date={day}")
@@ -51,26 +52,26 @@ def sentence(daily: dict) -> str:
     rain = daily["precipitation_sum"][0] or 0.0
     sky = describe(int(daily["weather_code"][0]))
 
-    parts = [f"Oggi a Palermo {sky}, massima {high} gradi, minima {low}"]
+    parts = [f"Oggi a {CITY} {sky}, massima {high} gradi, minima {low}"]
     if rain >= 1.0:
         parts.append("e piove")
     elif rain > 0.0:
         parts.append("con due gocce")
     line = ", ".join(parts) + "."
 
-    # Say what the number means, rather than leaving the model to reach for the
-    # stereotype the written line used to carry.
-    if high >= 30:
-        line += " Fa caldo davvero."
-    elif high >= 27:
-        line += " Si sta bene, caldo ma non da morire."
+    # Say what the number means (for November), rather than leaving the model to
+    # reach for a stereotype.
+    if high <= 8:
+        line += " Fa freddo davvero."
+    elif high <= 14:
+        line += " Fa freddino, ci vuole la giacca."
     else:
-        line += " Non fa il caldo che uno si aspetta a Palermo."
+        line += " Per essere novembre non fa freddo."
     return line
 
 
 def live_line(day: str = "", timeout: float = 6.0) -> str:
-    """Today in Palermo, or "" if anything at all goes wrong.
+    """Today in the event's city, or "" if anything at all goes wrong.
 
     Deliberately swallows everything, including a malformed answer: the caller's
     fallback is a true-ish line from a file, which beats both a crash and a
@@ -78,7 +79,7 @@ def live_line(day: str = "", timeout: float = 6.0) -> str:
     """
     day = day or datetime.date.today().isoformat()
     try:
-        url = API.format(lat=PALERMO[0], lon=PALERMO[1], day=day)
+        url = API.format(lat=WHERE[0], lon=WHERE[1], day=day)
         with urllib.request.urlopen(url, timeout=timeout) as response:
             daily = json.loads(response.read().decode("utf-8"))["daily"]
         return sentence(daily)

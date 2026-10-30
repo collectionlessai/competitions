@@ -1,23 +1,21 @@
-"""Put the real Palermo weather into the knowledge base.
+"""Put the real weather of the event's city into the knowledge base.
 
 The context file used to assert "fa caldo, sui trenta gradi" — written by hand
-and never checked. The forecast for the conference days is 26.7, 27.3 and 25.4
-degrees, with drizzle on two of the three. That gap matters more than it looks:
-the weather is the single most checkable fact between people standing in the
-same city. An agent complaining about thirty degrees while it drizzles at
-twenty-five has planted a bait against itself, and anyone actually in Palermo
-collects it for free.
+and never checked (CLiC-it, Palermo: the forecast said 25-27 with drizzle). The
+weather is the single most checkable fact between people standing in the same
+city, so the line is filled from a forecast instead of from a stereotype. Run it
+the morning of the event — a forecast fetched days early is worth little, and
+this costs one request:
 
-So the line is filled from a forecast instead of from a stereotype. Run it the
-morning of each conference day — a forecast fetched nine days early is worth
-very little, and this costs one request:
-
-    python update_weather.py            # today in Palermo
-    python update_weather.py 2026-09-15 # a specific day
+    python update_weather.py            # today (SAINET day: Siena, 2026-11-11)
+    python update_weather.py 2026-11-11 # a specific day
 
 It rewrites only the ## METEO block of `processors/context_it.txt` and leaves
 everything else alone. With no network it changes nothing and says so, which is
 the right failure: a stale true-ish line beats a wrong fresh one.
+
+The city, the request and the wording live in `processors/weather.py`, which the
+launcher also uses at startup: one place to change for the next event.
 """
 import datetime
 import io
@@ -28,59 +26,15 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONTEXT = os.path.join(HERE, "processors", "context_it.txt")
+sys.path.insert(0, HERE)
 
-PALERMO = (38.1157, 13.3615)
-API = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-       "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code"
-       "&timezone=Europe%2FRome&start_date={day}&end_date={day}")
-
-# WMO codes, grouped the way a person would actually describe the sky rather
-# than the way the standard splits them.
-SKY = [
-    ((0, 1), "sereno"),
-    ((2,), "poco nuvoloso"),
-    ((3,), "nuvoloso"),
-    ((45, 48), "nebbia"),
-    ((51, 53, 55, 56, 57), "pioviggine"),
-    ((61, 63, 65, 66, 67, 80, 81, 82), "pioggia"),
-    ((95, 96, 99), "temporale"),
-]
-
-
-def describe(code: int) -> str:
-    for codes, word in SKY:
-        if code in codes:
-            return word
-    return "variabile"
+from processors.weather import API, WHERE, sentence  # noqa: E402
 
 
 def fetch(day: str) -> dict:
-    url = API.format(lat=PALERMO[0], lon=PALERMO[1], day=day)
+    url = API.format(lat=WHERE[0], lon=WHERE[1], day=day)
     with urllib.request.urlopen(url, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
-
-
-def sentence(daily: dict) -> str:
-    high = round(daily["temperature_2m_max"][0])
-    low = round(daily["temperature_2m_min"][0])
-    rain = daily["precipitation_sum"][0] or 0.0
-    sky = describe(int(daily["weather_code"][0]))
-
-    parts = [f"Oggi a Palermo {sky}, massima {high} gradi, minima {low}"]
-    if rain >= 1.0:
-        parts.append("e piove")
-    elif rain > 0.0:
-        parts.append("con due gocce")
-    line = ", ".join(parts) + "."
-    # The old line claimed heat that was not there. Say what the number means
-    # rather than leaving the model to reach for the stereotype again.
-    if high >= 30:
-        line += " Fa caldo davvero."
-    elif high >= 27:
-        line += " Si sta bene, caldo ma non da morire."
-    else:
-        line += " Non fa il caldo che uno si aspetta a Palermo."
-    return line
 
 
 def rewrite(line: str) -> bool:

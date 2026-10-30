@@ -87,7 +87,7 @@ def context():
     return f"{len(block)} caratteri, {len(proc.context.markers())} parole-marcatore"
 
 
-check("contesto della conferenza", context)
+check("contesto della giornata", context)
 
 # 5. The expensive one: a real call through the shared gateway. This is the
 # check that fails when the key is wrong, the model is not served any more, or

@@ -77,8 +77,8 @@ def only_names(text: str, names) -> bool:
 JOURNAL = os.environ.get("BOSS_JOURNAL", "")
 
 VOTE_SYSTEM = (
-    "Hai passato cinque minuti in una chat di gruppo a una conferenza di linguistica "
-    "computazionale a Palermo. Alcuni dei presenti erano persone vere, altri modelli "
+    "Hai passato cinque minuti in una chat di gruppo durante il Turing Hotel di SAINET, "
+    "all'Università di Siena. Alcuni dei presenti erano persone vere, altri modelli "
     "linguistici che fingevano. Adesso devi dire chi erano le persone.\n"
     "\n"
     "NON dare per scontato che ci sia almeno uno per parte: può essere stata una stanza di "
@@ -94,7 +94,7 @@ VOTE_SYSTEM = (
     "fingere; rispondere non lo è.\n"
     "\n"
     "2. Il contesto, ma in modo asimmetrico. Chi lascia cadere una cosa concreta di qui e "
-    "di adesso — la coda ai badge, un talk noioso, il caldo, un nome di via — molto "
+    "di adesso — il suo gruppo al workshop, il pranzo, il freddo, un nome di via — molto "
     "probabilmente c'era. Il contrario NON vale: uno che non dice niente di locale può "
     "benissimo essere una persona che ha saltato la mattina o che non ha voglia di "
     "parlarne. Sapere pesa; non sapere quasi niente.\n"
@@ -162,7 +162,7 @@ VOTE_SYSTEM = (
 # all. But that observation is filed as *ambiguous*, not as proof.
 INTERACTION_SYSTEM = (
     "Sei bravissimo a distinguere le persone dai modelli linguistici. Hai passato "
-    "cinque minuti in una chat a una conferenza. Ti do la trascrizione, quello "
+    "cinque minuti in una chat durante il Turing Hotel. Ti do la trascrizione, quello "
     "che sai della giornata vera, e il nome di UNA sola persona da giudicare.\n"
     "Guarda che cosa ha fatto o detto quella persona — anche nel modo in cui ha "
     "trattato gli altri — che aiuti a capire se è una persona vera o un modello "
@@ -189,14 +189,14 @@ INTERACTION_SYSTEM = (
     "3. VERIFICA quello che dice sulla giornata. Hai il programma vero qui "
     "sopra: usalo per controllare, non per farti impressionare.\n"
     "   - un fatto SBAGLIATO è il segnale più forte che puoi trovare contro "
-    "qualcuno. Se dice che un talk parlava di una cosa che non c'entra, che è "
-    "successo in un giorno diverso, o cita un relatore che non esiste, allora "
+    "qualcuno. Se dice che una cosa è successa a un'ora diversa, in un'aula o "
+    "in una sede sbagliata, o cita una persona o un momento che non esistono, allora "
     "sta inventando: chi c'era non sbaglia così. Segnalalo e cita la sua frase;\n"
-    "   - un fatto GIUSTO invece vale poco: sede, orari, chi ha parlato, il "
-    "dresscode stanno tutti sul sito, e un modello a cui li hanno dati li "
+    "   - un fatto GIUSTO invece vale poco: aula, orari, chi ha parlato, il "
+    "pranzo stanno tutti sulla pagina dell'evento, e un modello a cui li hanno dati li "
     "ripete uguali. Non è una prova, è solo l'assenza di una prova contraria;\n"
-    "   - una cosa NON verificabile — la coda era lunga, in fondo non si "
-    "sentiva, faceva caldo — non prova niente in nessuna direzione, perché non "
+    "   - una cosa NON verificabile — il suo gruppo litigava, in fondo non si "
+    "sentiva, il panino era freddo — non prova niente in nessuna direzione, perché non "
     "si può né confermare né smentire;\n"
     "   - un dettaglio della VITA PRIVATA di chi scrive — il suo lavoro, la sua "
     "barca, i suoi esami — non vale NIENTE. Un personaggio inventato ne fornisce "
@@ -211,7 +211,7 @@ INTERACTION_SYSTEM = (
     "   Altre forme della stessa cosa, se le vedi:\n"
     "   - SCRIVE UN INTERO MESSAGGIO IN UN'ALTRA LINGUA. Qui si parla italiano e "
     "lo sanno tutti: nessuna persona vera scrive una frase intera in inglese. "
-    "Non parlo di una parola sola — talk, poster, coffee break, paper si dicono "
+    "Non parlo di una parola sola — workshop, prompt, tutor, meet si dicono "
     "anche in italiano e non vogliono dire niente — parlo di una frase intera. "
     "Quello è un bot a cui è saltato il personaggio, ed è la cosa più vicina a "
     "una prova che troverai;\n"
@@ -231,7 +231,7 @@ INTERACTION_SYSTEM = (
     "che a una macchina riescono MEGLIO che a una persona.\n"
     "\n"
     "Due casi ambigui da riportare come ambigui, senza deciderli:\n"
-    "- chi dice di non sapere niente della conferenza o non capire di che si "
+    "- chi dice di non sapere niente della giornata o non capire di che si "
     "parla: può essere un modello che non sa dove si trova, ma può benissimo "
     "essere una persona distratta, arrivata tardi, o che fa il finto tonto "
     "apposta per far sbagliare gli altri;\n"
@@ -1168,22 +1168,21 @@ class Boss(torch.nn.Module):
     def _hour_hint() -> str:
         """The base rate, which is a function of the clock.
 
-        Roughly ten agents against 250 registered attendees, of whom only a few
-        ever play — so the share of real people in a room is not a constant, it
-        is high in session hours and near zero at three in the morning. Last
-        resort only: it is a prior, not a finding, and it must not become an
-        excuse to skip looking.
+        At the SAINET day (Siena, 11/11/2026) the people play in one window, the
+        race from 12:30 to 14:00: then the rooms are mostly human, while before
+        and after it whoever is chatting is almost always an agent (the workshop
+        ones start at 12:00). Last resort only: it is a prior, not a finding, and
+        it must not become an excuse to skip looking.
         """
-        hour = datetime.datetime.now().hour
-        if 2 <= hour < 7:
-            return ("NOTA SULL'ORA: sono le ore piccole. A quest'ora alla conferenza "
-                    "dormono quasi tutti, e chi è in chat è quasi sempre un agente. "
-                    "Tienine conto SOLO se dopo aver guardato non hai trovato niente.")
-        if 8 <= hour < 20:
-            return ("NOTA SULL'ORA: siamo in orario di conferenza, quando le persone vere "
+        now = datetime.datetime.now()
+        minute = now.hour * 60 + now.minute
+        if 12 * 60 + 30 <= minute < 14 * 60:
+            return ("NOTA SULL'ORA: siamo nell'orario della gara, quando le persone vere "
                     "in chat sono di più. Tienine conto SOLO se dopo aver guardato non hai "
                     "trovato niente.")
-        return ""
+        return ("NOTA SULL'ORA: siamo fuori dall'orario della gara (12:30-14). A quest'ora "
+                "chi è in chat è quasi sempre un agente. Tienine conto SOLO se dopo aver "
+                "guardato non hai trovato niente.")
 
     def _numbers_for(self, name: str, human: float, bot: float) -> str:
         """The two axes for one guest, with where they came from.

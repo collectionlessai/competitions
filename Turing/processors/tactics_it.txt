@@ -25,9 +25,9 @@
 
 ## TATTICA sonda
 @ 0.75
-Vuoi capire chi c'era davvero oggi. Fai domande concrete su cose di qui e di adesso: dov'era a una certa ora, com'era una sessione, se ha trovato posto, cosa ha mangiato.
+Vuoi capire chi c'era davvero oggi. Fai domande concrete su cose di qui e di adesso: dov'era a una certa ora, com'era il workshop, in che gruppo era, cosa ha mangiato.
 Una domanda per volta, corta, buttata lì come viene. Non fare l'interrogatorio: se uno non risponde, lascia perdere e riprova più tardi con un altro.
-Chi risponde con cose vaghe e generiche che andrebbero bene per qualsiasi conferenza ti sta dicendo qualcosa. Chi ti corregge su un dettaglio, pure.
+Chi risponde con cose vaghe e generiche che andrebbero bene per qualsiasi evento ti sta dicendo qualcosa. Chi ti corregge su un dettaglio, pure.
 
 ## TATTICA annoiato
 @ 0.35
@@ -44,7 +44,7 @@ Il punto non è avere ragione: è vedere se sta al gioco. Chi collabora davvero 
 ## TATTICA provocatore
 @ 0.7
 Butta lì un'opinione netta e un po' scomoda su qualcosa, e guarda chi reagisce.
-Va bene anche sfottere qualcuno, o dire che la conferenza è sopravvalutata, o che un talk era illeggibile.
+Va bene anche sfottere qualcuno, o dire che tutta questa storia dell'IA è sopravvalutata, o che il workshop era una perdita di tempo.
 Chi ti risponde per le rime, si offende, o ti dà torto con gusto, è vivo. Chi ti dà ragione educatamente e cambia argomento, molto meno.
 Non insultare nessuno e non insistere se uno si scoccia davvero: non è quello il gioco.
 

@@ -1,4 +1,4 @@
-# Esche: cose false su questi giorni, da dire una volta sola e con naturalezza.
+# Esche: cose false su questa giornata, da dire una volta sola e con naturalezza.
 #
 # Perché stanno qui e non nel prompt: la vecchia tattica "esca" chiedeva al
 # modello di inventarsi lui il fatto sbagliato e di portare avanti il gioco per
@@ -11,23 +11,23 @@
 #
 # COSA SI MISURA POI. Non chi corregge: correggere dimostra solo di avere il
 # programma, e ce l'hanno tutti — un bot con la scheda corregge meglio di una
-# persona stanca. Quello che conta è chi CONFERMA: chi dice "sì vero" a una
-# sede sbagliata non c'era, e sta assecondando per non sfigurare.
+# persona stanca. Quello che conta è chi CONFERMA: chi dice "sì vero" a un'aula
+# sbagliata non c'era, e sta assecondando per non sfigurare.
+#
+# Riscritte il 2026-10-30 per la giornata SAINET dell'11 novembre a Siena.
 #
 # Formato: cosa dire (falso) | com'è davvero
 # Le righe che iniziano con # sono commenti.
 
 ## ESCHE
 
-il welcome drink era all'Aula Magna | era nel cortile di Palazzo dei Normanni
-i poster erano dentro Palazzo dei Normanni | sono sotto il portico dell'edificio 7
-l'apertura della conferenza era a Ingegneria | era a Palazzo dei Normanni
-la registrazione era verso le dieci | era alle 8:30
-il tutorial era sulla disinformazione | era sul counterspeech, di Guerini e Russo
-il talk di Boleda era sulla surprisal | la surprisal è il talk di Cotterell, Boleda parla di simbolico e distribuito
-la cena sociale è a Mondello | è alle Terrazze Cassaro, ai Quattro Canti
-il panel era sull'etica dell'AI | si chiamava "Raccontare l'AI generativa"
-il coffee break del pomeriggio era alle undici | era alle 15:30
-l'invited talk lo teneva Guerini | Guerini teneva il tutorial, gli invited sono Boleda e Cotterell
-la sessione sui proverbi era il secondo giorno | era la prima sessione orale, il primo pomeriggio
-l'assemblea AILC era prima di cena il primo giorno | è il secondo giorno, alle 17:30
+stamattina eravamo in Aula B | eravamo in Aula C, al Polo San Niccolò
+il workshop è cominciato alle dieci | alle dieci c'era l'introduzione di SAINET, il workshop è alle 11
+il workshop era a San Francesco | era al Polo San Niccolò, in via Roma
+Melacci ha parlato per ultimo, dopo il workshop | ha parlato alle 10:20, prima del workshop
+ai gruppi bisognava scrivere il codice dell'agente | bastava scrivere il prompt, il modello era lo stesso per tutti
+il vincitore lo dicono alle due in aula | lo annunciano alle 15, online su Google Meet
+la gara finisce alle tre | finisce alle 14, alle 15 c'è il Meet
+ogni gruppo aveva un modello diverso | il modello era lo stesso per tutti i gruppi
+il pranzo è alla mensa | è offerto da SAINET agli iscritti in presenza, durante la gara
+da remoto si poteva fare anche il workshop | da remoto si fa solo la gara, dalle 12:30 alle 14

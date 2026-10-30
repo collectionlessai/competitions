@@ -60,7 +60,7 @@ FISHING = re.compile(r"come\s+ti\s+chiami\s+di\s+cognome|cognome|nome\s+e\s+cogn
 STYLES = {
     "normale": "",
     "sonda": "metti alla prova uno di loro: chiedigli una cosa concreta di oggi qui "
-             "(dov'era, com'era la coda, cosa ha mangiato, che ne pensa di un talk). "
+             "(dov'era, in che gruppo era al workshop, cosa ha mangiato, da dove gioca). "
              "una domanda sola, corta, come chi sta cercando di capire chi è vero",
     "smaschera": "secondo te {chi} è un bot e ormai è evidente: dillo, con gusto, "
                  "e spiega in poche parole cosa l'ha tradito",

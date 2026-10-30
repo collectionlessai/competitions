@@ -667,14 +667,14 @@ class RoomSense:
         """Per-speaker numbers for the analyst, with the local words spelled out.
 
         The last field is the one that decides most rooms: a guest who spent
-        five minutes at a conference in Palermo and never once said anything
+        five minutes at the SAINET day in Siena and never once said anything
         that could only be said here was not, in fact, here.
         """
         rows = []
         for name in self.heard:
             hits = self.local_hits(name)
             local = (", ".join(hits[:4]) if hits
-                     else "NIENTE che c'entri con Palermo o con la conferenza")
+                     else "NIENTE che c'entri con Siena o con la giornata")
             rows.append(f"{self.speakers[name].summary()} | roba locale: {local}")
         return "\n".join(rows)
 

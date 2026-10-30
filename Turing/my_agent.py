@@ -1,8 +1,9 @@
 """One agent, one node, many rooms. This is the file you run.
 
-    pip install unaiverse
+    pip install unaiverse openai
     export NODE_KEY=...              # from your profile on unaiverse.io
-    export FEATHERLESS_API_KEY=...   # from featherless.ai
+    export OPENROUTER_API_KEY=...    # SAINET day (default); never written in a file
+    #   or BOSS_BACKEND=featherless and FEATHERLESS_API_KEY=... (the CLiC-it setup)
     cd Turing
     python my_agent.py
 
@@ -60,20 +61,33 @@ WORLD = os.environ.get("BOSS_WORLD", "jolly-mayer/TuringHotelItaly")
 # 13%/70% for the fastest Italian fine-tune. Its median latency, 2.6s, turned
 # out to be the same as the 32B once warm — the 19s in the first screen was a
 # cold start.
-MODEL = os.environ.get("BOSS_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+#
+# For the SAINET day (Siena, 11/11/2026) the models are served by OpenRouter,
+# where the 72B is not the point: at CLiC-it the small models fooled better. The
+# default there is Gemma 4 31B with Mistral Small 3.2 behind it.
+BACKEND = os.environ.get("BOSS_BACKEND", "openrouter")
+DEFAULT_MODELS = {"featherless": ("Qwen/Qwen2.5-72B-Instruct", "Qwen/Qwen2.5-32B-Instruct"),
+                  "openrouter": ("google/gemma-4-31b-it", "mistralai/mistral-small-3.2-24b-instruct")}
+MODEL = os.environ.get("BOSS_MODEL", DEFAULT_MODELS[BACKEND][0])
 
 # Where to go when the model above will not answer. Featherless returns 503
 # capacity_exhausted under load — constantly, on the small Italian fine-tunes —
 # and across a 300-second room that is a guest who only ever says "aspe". The
 # fallback is built on first use, so it costs nothing until it is needed.
-FALLBACK = os.environ.get("BOSS_FALLBACK", "Qwen/Qwen2.5-32B-Instruct")
+FALLBACK = os.environ.get("BOSS_FALLBACK", DEFAULT_MODELS[BACKEND][1])
+
+SAMPLER = dict(max_tokens=60, temperature=0.95, top_p=0.95, top_k=60, repetition_penalty=1.08)
 
 
 # WHAT TO SAY. A persona drawn fresh each room, a director that decides what kind
 # of turn this is, and a pass that takes the model back out of the answer.
 
-proc = Boss(model=MODEL, fallback=FALLBACK, max_tokens=60, temperature=0.95,
-            top_p=0.95, top_k=60, repetition_penalty=1.08)
+if BACKEND == "openrouter":
+    from processors.openrouter_backend import OpenRouterBackend
+    proc = Boss(model=MODEL, backend=OpenRouterBackend(model=MODEL, fallback=FALLBACK, **SAMPLER),
+                max_tokens=SAMPLER["max_tokens"], temperature=SAMPLER["temperature"])
+else:
+    proc = Boss(model=MODEL, fallback=FALLBACK, **SAMPLER)
 
 # WHEN TO SAY IT. Delay proportional to what was read and written, under a mood
 # that goes quiet for stretches. It shares `proc.sense` so the processor knows
