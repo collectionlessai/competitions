@@ -2,8 +2,9 @@
 
     pip install unaiverse openai
     export NODE_KEY=...              # from your profile on unaiverse.io
-    export OPENROUTER_API_KEY=...    # SAINET day (default); never written in a file
-    #   or BOSS_BACKEND=featherless and FEATHERLESS_API_KEY=... (the CLiC-it setup)
+    export FEATHERLESS_API_KEY=...   # first choice, as at CLiC-it
+    export OPENROUTER_API_KEY=...    # optional: last resort when Featherless fails; never in a file
+    #   or BOSS_BACKEND=openrouter to run on OpenRouter alone
     cd Turing
     python my_agent.py
 
@@ -62,10 +63,12 @@ WORLD = os.environ.get("BOSS_WORLD", "jolly-mayer/TuringHotelItaly")
 # out to be the same as the 32B once warm — the 19s in the first screen was a
 # cold start.
 #
-# For the SAINET day (Siena, 11/11/2026) the models are served by OpenRouter,
-# where the 72B is not the point: at CLiC-it the small models fooled better. The
-# default there is Gemma 4 31B with Mistral Small 3.2 behind it.
-BACKEND = os.environ.get("BOSS_BACKEND", "openrouter")
+# For the SAINET day (Siena, 11/11/2026) Featherless stays the first choice.
+# OpenRouter is the last resort when OPENROUTER_API_KEY is set: Gemma 4 31B
+# with Mistral Small 3.2 behind it, asked only when every Featherless model has
+# failed (a 429 when the account's units are taken by the other guests).
+# BOSS_BACKEND=openrouter skips Featherless altogether.
+BACKEND = os.environ.get("BOSS_BACKEND", "featherless")
 DEFAULT_MODELS = {"featherless": ("Qwen/Qwen2.5-72B-Instruct", "Qwen/Qwen2.5-32B-Instruct"),
                   "openrouter": ("google/gemma-4-31b-it", "mistralai/mistral-small-3.2-24b-instruct")}
 MODEL = os.environ.get("BOSS_MODEL", DEFAULT_MODELS[BACKEND][0])
@@ -85,6 +88,13 @@ SAMPLER = dict(max_tokens=60, temperature=0.95, top_p=0.95, top_k=60, repetition
 if BACKEND == "openrouter":
     from processors.openrouter_backend import OpenRouterBackend
     proc = Boss(model=MODEL, backend=OpenRouterBackend(model=MODEL, fallback=FALLBACK, **SAMPLER),
+                max_tokens=SAMPLER["max_tokens"], temperature=SAMPLER["temperature"])
+elif os.environ.get("OPENROUTER_API_KEY"):
+    from processors.featherless import FeatherlessBackend
+    from processors.openrouter_backend import OpenRouterBackend, Relay
+    reserve = DEFAULT_MODELS["openrouter"]
+    proc = Boss(model=MODEL, backend=Relay(FeatherlessBackend(model=MODEL, fallback=FALLBACK, **SAMPLER),
+                                           OpenRouterBackend(model=reserve[0], fallback=reserve[1], **SAMPLER)),
                 max_tokens=SAMPLER["max_tokens"], temperature=SAMPLER["temperature"])
 else:
     proc = Boss(model=MODEL, fallback=FALLBACK, **SAMPLER)

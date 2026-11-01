@@ -45,7 +45,8 @@ def keys():
         raise RuntimeError("né NODE_KEY né il file di cache della chiave")
     if not os.environ.get("FEATHERLESS_API_KEY"):
         raise RuntimeError("FEATHERLESS_API_KEY non impostata")
-    return "NODE_KEY " + ("da env" if node_key else "da cache") + ", FEATHERLESS_API_KEY presente"
+    riserva = ", OPENROUTER_API_KEY di riserva" if os.environ.get("OPENROUTER_API_KEY") else ", nessuna riserva OpenRouter"
+    return "NODE_KEY " + ("da env" if node_key else "da cache") + ", FEATHERLESS_API_KEY presente" + riserva
 
 
 check("chiavi", keys)

@@ -1,8 +1,8 @@
-"""OpenRouter, as a backend for the boss (the SAINET day runs on OpenRouter, not Featherless).
+"""OpenRouter, as a backend for the boss: on the SAINET day, the last resort behind Featherless.
 
     pip install openai
     export OPENROUTER_API_KEY=sk-or-...     # never written in any file
-    export BOSS_BACKEND=openrouter          # see my_agent.py
+    export BOSS_BACKEND=openrouter          # only to skip Featherless; see my_agent.py
 
 Same contract as `FeatherlessBackend`, which is what `boss.py` calls and
 `bench/canned.py` fakes:
@@ -89,3 +89,33 @@ class OpenRouterBackend:
             self.client.close()
         except Exception:
             pass
+
+
+class Relay:
+    """Ask `first`; only when it raises, ask `then` with the same call.
+
+    How the boss keeps Featherless as its first choice and OpenRouter as the
+    last resort: a key over its concurrency budget answers 429, the Featherless
+    fallbacks share the same budget, and a room does not wait for units to free
+    up. Same contract as both backends, so the boss cannot tell it apart.
+    """
+
+    def __init__(self, first, then):
+        self.first, self.then = first, then
+        self.relayed = 0            # calls that went to `then`, for the logs
+
+    def __call__(self, *args, **kwargs) -> str:
+        try:
+            return self.first(*args, **kwargs)
+        except Exception as e:
+            self.relayed += 1
+            if self.relayed == 1:
+                print(f"[boss] first backend failed, relaying to the second: {type(e).__name__}: {e}")
+            return self.then(*args, **kwargs)
+
+    def close(self) -> None:
+        for backend in (self.first, self.then):
+            try:
+                backend.close()
+            except Exception:
+                pass
